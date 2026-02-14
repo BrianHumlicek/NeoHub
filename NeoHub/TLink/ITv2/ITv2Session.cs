@@ -85,6 +85,7 @@ namespace DSC.TLink.ITv2
                 _log.LogError(ex, "Error initializing session");
                 return false;
             }
+            _log.LogInformation("Session {sessionID} initialized successfully", _sessionID);
             _sessionState = sessionState.Connected;
             return true;
         }
@@ -92,6 +93,8 @@ namespace DSC.TLink.ITv2
         private async Task HandshakeAsync(ITv2MessagePacket messagePacket, CancellationToken cancellation)
         {
             OpenSession openSessionMessage = messagePacket.messageData.As<OpenSession>();
+
+            _log.LogInformation("Open Session message for encryption type {encryptionType}", openSessionMessage.EncryptionType);
 
             await executeInboundTransactionAsync(messagePacket);
 
@@ -103,13 +106,31 @@ namespace DSC.TLink.ITv2
 
             RequestAccess requestAccess = messagePacket.messageData.As<RequestAccess>();
 
+            _log.LogInformation("Request Access message received");
+
             _encryptionHandler!.ConfigureOutboundEncryption(requestAccess.Initializer);
-            
-            await executeInboundTransactionAsync(messagePacket);
 
-            requestAccess = new RequestAccess() { Initializer = _encryptionHandler.ConfigureInboundEncryption() };
+            try
+            {
+                await executeInboundTransactionAsync(messagePacket);
 
-            await executeOutboundTransactionAsync(requestAccess);
+                requestAccess = new RequestAccess() { Initializer = _encryptionHandler.ConfigureInboundEncryption() };
+
+                await executeOutboundTransactionAsync(requestAccess);
+            }
+            catch
+            {
+                _log.LogError("There was a problem negotiating encryption");
+                if (openSessionMessage.EncryptionType == EncryptionType.Type1)
+                {
+                    _log.LogError("The remote communicator is configured for encryption type 1.  This means that the Type 1 Access Code [851][423,450,477,504] is most likely incorrect.");
+                }
+                if (openSessionMessage.EncryptionType == EncryptionType.Type2)
+                {
+                    _log.LogError("The remote communicator is configured for encryption type 2.  This means that the Type 2 Access Code [851][700,701,702,703] is most likely incorrect.");
+                }
+                throw;
+            }
             
             return;
             

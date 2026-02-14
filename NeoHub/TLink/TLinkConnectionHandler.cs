@@ -55,7 +55,10 @@ namespace DSC.TLink
                 var sessionConnected = await session.InitializeSession(connection.Transport, connection.ConnectionClosed);
 
                 if (!sessionConnected)
+                {
+                    _log.LogError("Session failed to properly initialize.  Closing connection.");
                     return;
+                }
 
                 // Register session for command routing
                 sessionManager.RegisterSession(session.SessionID, session);
