@@ -43,19 +43,22 @@ namespace DSC.TLink.ITv2
             {
                 byte lengthByte2 = bytes.PopByte();
                 ushort encodedLength = BigEndianExtensions.U16((byte)(lengthByte1 & 0x7F), bytes.PopByte());
-                if (encodedLength > bytes.Length) throw new Exception($"Encoded message length {encodedLength} exceeds data length {bytes.Length}!");
+                if (encodedLength > bytes.Length)
+                    throw new Exception($"Encoded message length {encodedLength} exceeds data length {bytes.Length}\nMessage {ILoggerExtensions.Enumerable2HexString(bytes.ToArray())}");
                 bytes = bytes.Slice(0, encodedLength);
                 encodedCRC = bytes.PopTrailingWord();
                 calculatedCRC = crc16([lengthByte1, lengthByte2, .. bytes]);
             }
             else
             {
-                if (lengthByte1 > bytes.Length) throw new Exception($"Encoded message length {lengthByte1} exceeds data length {bytes.Length}!");
+                if (lengthByte1 > bytes.Length)
+                    throw new Exception($"Encoded message length {lengthByte1} exceeds data length {bytes.Length}\nMessage {ILoggerExtensions.Enumerable2HexString(bytes.ToArray())}");
                 bytes = bytes.Slice(0, lengthByte1);
                 encodedCRC = bytes.PopTrailingWord();
                 calculatedCRC = crc16([lengthByte1, .. bytes]);
             }
-            if (encodedCRC != calculatedCRC) throw new Exception($"Framing CRC error!  Expected 0x{encodedCRC:X4} but calculated 0x{calculatedCRC:X4}");
+            if (encodedCRC != calculatedCRC)
+                throw new Exception($"Framing CRC error!  The message CRC is 0x{encodedCRC:X4} but the calculated CRC is 0x{calculatedCRC:X4}\nMessage {ILoggerExtensions.Enumerable2HexString(bytes.ToArray())}");
         }
 
         static int crc16(IEnumerable<byte> crcRange)
