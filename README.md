@@ -8,8 +8,8 @@ A real-time web portal for monitoring and controlling DSC PowerSeries NEO alarm 
 
 | Registry | Image | Pull Command |
 |---|---|---|
-| GitHub Container Registry | [`ghcr.io/brianhumlicek/NeoHub`](https://ghcr.io/brianhumlicek/NeoHub) | `docker pull ghcr.io/brianhumlicek/NeoHub:latest` |
-| Docker Hub | [`brianhumlicek/NeoHub`](https://hub.docker.com/r/brianhumlicek/NeoHub) | `docker pull brianhumlicek/NeoHub:latest` |
+| GitHub Container Registry | [`ghcr.io/brianhumlicek/neohub`](https://ghcr.io/brianhumlicek/neohub) | `docker pull ghcr.io/brianhumlicek/NeoHub:latest` |
+| Docker Hub | [`brianhumlicek/neohub`](https://hub.docker.com/r/brianhumlicek/neohub) | `docker pull brianhumlicek/NeoHub:latest` |
 
 ---
 
