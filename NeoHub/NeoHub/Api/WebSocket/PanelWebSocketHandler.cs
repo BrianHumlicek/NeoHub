@@ -219,11 +219,6 @@ namespace NeoHub.Api.WebSocket
 
             if (type == "disarm")
             {
-                if (string.IsNullOrEmpty(code))
-                {
-                    await SendErrorAsync(webSocket, "Access code is required to disarm", clientId);
-                    return;
-                }
                 result = await _commandService.DisarmAsync(sessionId, partition, code);
             }
             else

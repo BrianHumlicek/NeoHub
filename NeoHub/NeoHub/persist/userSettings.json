@@ -12,5 +12,8 @@
     "CategoryOverrides": {
       "NeoHub.Api.WebSocket.PanelWebSocketHandler": 1
     }
+  },
+  "Application": {
+    "DefaultAccessCode": "1234"
   }
 }

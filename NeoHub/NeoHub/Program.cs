@@ -27,6 +27,8 @@ namespace NeoHub
                 builder.Configuration.GetSection(ITv2Settings.SectionName));
             builder.Services.Configure<DiagnosticsSettings>(
                 builder.Configuration.GetSection(DiagnosticsSettings.SectionName));
+            builder.Services.Configure<ApplicationSettings>(
+                builder.Configuration.GetSection(ApplicationSettings.SectionName));
 
             // Register settings services
             builder.Services.AddSingleton<ISettingsDiscoveryService, SettingsDiscoveryService>();

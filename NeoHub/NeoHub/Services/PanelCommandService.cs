@@ -1,7 +1,10 @@
+using DSC.TLink.ITv2;
 using DSC.TLink.ITv2.Enumerations;
 using DSC.TLink.ITv2.MediatR;
 using DSC.TLink.ITv2.Messages;
 using MediatR;
+using Microsoft.Extensions.Options;
+using NeoHub.Services.Settings;
 
 namespace NeoHub.Services
 {
@@ -9,38 +12,53 @@ namespace NeoHub.Services
     {
         private readonly IMediator _mediator;
         private readonly ILogger<PanelCommandService> _logger;
+        private readonly IOptionsMonitor<ApplicationSettings> _settings;
 
-        public PanelCommandService(IMediator mediator, ILogger<PanelCommandService> logger)
+        public PanelCommandService(
+            IMediator mediator, 
+            ILogger<PanelCommandService> logger,
+            IOptionsMonitor<ApplicationSettings> settings)
         {
             _mediator = mediator;
             _logger = logger;
+            _settings = settings;
         }
 
         public async Task<PanelCommandResult> ArmAsync(string sessionId, byte partition, ArmingMode mode, string? accessCode = null)
         {
+            var code = accessCode ?? _settings.CurrentValue.DefaultAccessCode ?? string.Empty;
+
             _logger.LogInformation(
-                "Arm command: Session={SessionId}, Partition={Partition}, Mode={Mode}",
-                sessionId, partition, mode);
+                "Arm command: Session={SessionId}, Partition={Partition}, Mode={Mode}, UsingDefaultCode={UsingDefault}",
+                sessionId, partition, mode, string.IsNullOrEmpty(accessCode) && !string.IsNullOrEmpty(_settings.CurrentValue.DefaultAccessCode));
+
             var message = new PartitionArm
             {
                 Partition = partition,
                 ArmMode = mode,
-                AccessCode = accessCode ?? string.Empty
+                AccessCode = code
             };
 
             return await SendCommandAsync(sessionId, message);
         }
 
-        public async Task<PanelCommandResult> DisarmAsync(string sessionId, byte partition, string accessCode)
+        public async Task<PanelCommandResult> DisarmAsync(string sessionId, byte partition, string? accessCode = null)
         {
+            var code = accessCode ?? _settings.CurrentValue.DefaultAccessCode;
+
+            if (string.IsNullOrEmpty(code))
+            {
+                return PanelCommandResult.Error("Access code is required to disarm");
+            }
+
             _logger.LogInformation(
-                "Disarm command: Session={SessionId}, Partition={Partition}",
-                sessionId, partition);
+                "Disarm command: Session={SessionId}, Partition={Partition}, UsingDefaultCode={UsingDefault}",
+                sessionId, partition, string.IsNullOrEmpty(accessCode) && !string.IsNullOrEmpty(_settings.CurrentValue.DefaultAccessCode));
 
             var message = new PartitionDisarm
             {
                 Partition = partition,
-                AccessCode = accessCode
+                AccessCode = code
             };
 
             return await SendCommandAsync(sessionId, message);

@@ -1,14 +1,18 @@
 @page "/"
 @using NeoHub.Services
 @using NeoHub.Services.Models
+@using NeoHub.Services.Settings
+@using DSC.TLink.ITv2
 @using DSC.TLink.ITv2.Enumerations
 @using DSC.TLink.ITv2.MediatR
+@using Microsoft.Extensions.Options
 @inject IPanelStateService PanelState
 @inject IPanelCommandService CommandService
 @inject IITv2SessionManager SessionManager
 @inject ISessionMonitor SessionMonitor
 @inject NavigationManager Navigation
 @inject ISnackbar Snackbar
+@inject IOptionsMonitor<ApplicationSettings> Settings
 @implements IDisposable
 
 <PageTitle>Security Panel Status</PageTitle>
@@ -162,7 +166,8 @@
                       Immediate="true"
                       Variant="Variant.Outlined"
                       ReadOnly="true"
-                      Class="mt-2 mb-4" />
+                      Class="mt-2 mb-4"
+                      HelperText="@(string.IsNullOrEmpty(Settings.CurrentValue.DefaultAccessCode) ? "" : "Leave empty to use default code")" />
 
         <MudGrid Spacing="2">
             @for (int i = 1; i <= 9; i++)
@@ -215,8 +220,7 @@
         <MudButton OnClick="@(() => showDisarmDialog = false)">Cancel</MudButton>
         <MudButton Color="Color.Success"
                    Variant="Variant.Filled"
-                   OnClick="DisarmPartitionAsync"
-                   Disabled="@(string.IsNullOrEmpty(disarmCode))">
+                   OnClick="DisarmPartitionAsync">
             Disarm
         </MudButton>
     </DialogActions>
@@ -354,11 +358,6 @@
     private async Task DisarmPartitionAsync()
     {
         if (string.IsNullOrEmpty(selectedSessionId) || !disarmPartition.HasValue) return;
-        if (string.IsNullOrEmpty(disarmCode))
-        {
-            Snackbar.Add("Access code is required", Severity.Warning);
-            return;
-        }
 
         showDisarmDialog = false;
         commandInProgress = true;
@@ -366,7 +365,9 @@
 
         try
         {
-            var result = await CommandService.DisarmAsync(selectedSessionId, disarmPartition.Value, disarmCode);
+            // Pass null if code is empty to use default from settings
+            var code = string.IsNullOrEmpty(disarmCode) ? null : disarmCode;
+            var result = await CommandService.DisarmAsync(selectedSessionId, disarmPartition.Value, code);
             if (!result.Success)
                 Snackbar.Add($"Disarm failed: {result.ErrorMessage}", Severity.Error);
         }

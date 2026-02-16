@@ -9,7 +9,7 @@ namespace NeoHub.Services
     public interface IPanelCommandService
     {
         Task<PanelCommandResult> ArmAsync(string sessionId, byte partition, ArmingMode mode, string? accessCode = null);
-        Task<PanelCommandResult> DisarmAsync(string sessionId, byte partition, string accessCode);
+        Task<PanelCommandResult> DisarmAsync(string sessionId, byte partition, string? accessCode = null);
     }
 
     public record PanelCommandResult
