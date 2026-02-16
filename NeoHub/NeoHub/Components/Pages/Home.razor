@@ -141,7 +141,7 @@
                                              Color="@GetZoneColor(zone)"
                                              Variant="@(zone.IsOpen || zone.IsFaulted || zone.IsTampered ? Variant.Filled : Variant.Outlined)">
                                         <MudIcon Icon="@GetZoneIcon(zone)" Size="Size.Small" Class="mr-1" />
-                                        Z@zoneNumber
+                                        Z@(zoneNumber)
                                     </MudChip>
                                 </MudTooltip>
                             </MudItem>
