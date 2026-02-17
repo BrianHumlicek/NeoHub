@@ -114,27 +114,42 @@ namespace NeoHub.Api.WebSocket
         {
             try
             {
-                var doc = JsonDocument.Parse(json);
-                var type = doc.RootElement.GetProperty("type").GetString();
-
-                _logger.LogDebug("Client {ClientId} request: {Type}", clientId, type);
-
-                switch (type)
+                var message = JsonSerializer.Deserialize<WebSocketMessage>(json, _jsonOptions);
+                
+                if (message == null)
                 {
-                    case "get_full_state":
+                    _logger.LogWarning("Client {ClientId} sent null message", clientId);
+                    await SendErrorAsync(webSocket, "Invalid message", clientId);
+                    return;
+                }
+
+                _logger.LogDebug("Client {ClientId} request: {MessageType}", clientId, message.GetType().Name);
+
+                switch (message)
+                {
+                    case GetFullStateMessage:
                         await SendFullStateAsync(webSocket, clientId);
                         break;
 
-                    case "arm_away":
-                    case "arm_home":
-                    case "arm_night":
-                    case "disarm":
-                        await HandleArmCommandAsync(webSocket, json, type, clientId);
+                    case ArmAwayMessage armAway:
+                        await HandleArmCommandAsync(webSocket, armAway, DSC.TLink.ITv2.Enumerations.ArmingMode.AwayArm, clientId);
+                        break;
+
+                    case ArmHomeMessage armHome:
+                        await HandleArmCommandAsync(webSocket, armHome, DSC.TLink.ITv2.Enumerations.ArmingMode.StayArm, clientId);
+                        break;
+
+                    case ArmNightMessage armNight:
+                        await HandleArmCommandAsync(webSocket, armNight, DSC.TLink.ITv2.Enumerations.ArmingMode.NightArm, clientId);
+                        break;
+
+                    case DisarmMessage disarm:
+                        await HandleDisarmCommandAsync(webSocket, disarm, clientId);
                         break;
 
                     default:
-                        _logger.LogWarning("Client {ClientId} sent unknown message type: {Type}", clientId, type);
-                        await SendErrorAsync(webSocket, $"Unknown message type: {type}", clientId);
+                        _logger.LogWarning("Client {ClientId} sent unknown message type: {MessageType}", clientId, message.GetType().Name);
+                        await SendErrorAsync(webSocket, $"Unknown message type: {message.GetType().Name}", clientId);
                         break;
                 }
             }
@@ -196,42 +211,32 @@ namespace NeoHub.Api.WebSocket
             await SendMessageAsync(webSocket, message, clientId);
         }
 
-        private async Task HandleArmCommandAsync(System.Net.WebSockets.WebSocket webSocket, string json, string type, string clientId)
+        private async Task HandleArmCommandAsync(
+            System.Net.WebSockets.WebSocket webSocket, 
+            ArmCommandMessage command, 
+            DSC.TLink.ITv2.Enumerations.ArmingMode mode, 
+            string clientId)
         {
-            var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
-            if (!root.TryGetProperty("session_id", out var sessionIdProp) ||
-                !root.TryGetProperty("partition_number", out var partitionProp))
-            {
-                await SendErrorAsync(webSocket, "Missing session_id or partition_number", clientId);
-                return;
-            }
-
-            var sessionId = sessionIdProp.GetString()!;
-            var partition = partitionProp.GetByte();
-            var code = root.TryGetProperty("code", out var codeProp) ? codeProp.GetString() : null;
-
             _logger.LogInformation("Client {ClientId} → {Command}: Session={SessionId}, Partition={Partition}",
-                clientId, type, sessionId, partition);
+                clientId, command.GetType().Name, command.SessionId, command.PartitionNumber);
 
-            PanelCommandResult result;
+            var result = await _commandService.ArmAsync(command.SessionId, command.PartitionNumber, mode, command.Code);
 
-            if (type == "disarm")
+            if (!result.Success)
             {
-                result = await _commandService.DisarmAsync(sessionId, partition, code);
+                await SendErrorAsync(webSocket, result.ErrorMessage ?? "Command failed", clientId);
             }
-            else
-            {
-                var mode = type switch
-                {
-                    "arm_away" => DSC.TLink.ITv2.Enumerations.ArmingMode.AwayArm,
-                    "arm_home" => DSC.TLink.ITv2.Enumerations.ArmingMode.StayArm,
-                    "arm_night" => DSC.TLink.ITv2.Enumerations.ArmingMode.NightArm,
-                    _ => DSC.TLink.ITv2.Enumerations.ArmingMode.AwayArm
-                };
-                result = await _commandService.ArmAsync(sessionId, partition, mode, code);
-            }
+        }
+
+        private async Task HandleDisarmCommandAsync(
+            System.Net.WebSockets.WebSocket webSocket, 
+            DisarmMessage command, 
+            string clientId)
+        {
+            _logger.LogInformation("Client {ClientId} → {Command}: Session={SessionId}, Partition={Partition}",
+                clientId, command.GetType().Name, command.SessionId, command.PartitionNumber);
+
+            var result = await _commandService.DisarmAsync(command.SessionId, command.PartitionNumber, command.Code);
 
             if (!result.Success)
             {
@@ -241,7 +246,7 @@ namespace NeoHub.Api.WebSocket
 
         private static readonly JsonSerializerOptions _jsonOptions = new()
         {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
             Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter(JsonNamingPolicy.SnakeCaseLower) }
         };
 
@@ -256,7 +261,7 @@ namespace NeoHub.Api.WebSocket
             // Serialize using message.GetType() so derived properties are included
             var json = JsonSerializer.Serialize(message, message.GetType(), _jsonOptions);
 
-            _logger.LogTrace("Client {ClientId} → {MessageType}: {Json}", clientId, message.Type, json);
+            _logger.LogTrace("Client {ClientId} → {MessageType}: {Json}", clientId, message.GetType().Name, json);
 
             var bytes = Encoding.UTF8.GetBytes(json);
             await webSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None);
@@ -340,7 +345,7 @@ namespace NeoHub.Api.WebSocket
         private async Task BroadcastMessageAsync(WebSocketMessage message)
         {
             var openClients = _connectedClients.Where(c => c.State == WebSocketState.Open).ToList();
-            _logger.LogTrace("Broadcasting {MessageType} to {Count} clients", message.Type, openClients.Count);
+            _logger.LogTrace("Broadcasting {MessageType} to {Count} clients", message.GetType().Name, openClients.Count);
 
             foreach (var client in openClients)
             {
@@ -350,7 +355,7 @@ namespace NeoHub.Api.WebSocket
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error broadcasting {MessageType} to client", message.Type);
+                    _logger.LogError(ex, "Error broadcasting {MessageType} to client", message.GetType().Name);
                 }
             }
         }

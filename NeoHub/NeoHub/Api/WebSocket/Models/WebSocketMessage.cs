@@ -4,50 +4,33 @@ using NeoHub.Services.Models;
 namespace NeoHub.Api.WebSocket.Models
 {
     // Base message for polymorphic deserialization
-    public abstract record WebSocketMessage
-    {
-        [JsonPropertyName("type")]
-        public abstract string Type { get; }
-    }
+    [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
+    [JsonDerivedType(typeof(GetFullStateMessage), "get_full_state")]
+    [JsonDerivedType(typeof(ArmAwayMessage), "arm_away")]
+    [JsonDerivedType(typeof(ArmHomeMessage), "arm_home")]
+    [JsonDerivedType(typeof(ArmNightMessage), "arm_night")]
+    [JsonDerivedType(typeof(DisarmMessage), "disarm")]
+    [JsonDerivedType(typeof(FullStateMessage), "full_state")]
+    [JsonDerivedType(typeof(PartitionUpdateMessage), "partition_update")]
+    [JsonDerivedType(typeof(ZoneUpdateMessage), "zone_update")]
+    [JsonDerivedType(typeof(ErrorMessage), "error")]
+    public abstract record WebSocketMessage;
 
     #region Client → Server
 
-    public record GetFullStateMessage : WebSocketMessage
-    {
-        public override string Type => "get_full_state";
-    }
+    public record GetFullStateMessage : WebSocketMessage;
 
     public abstract record ArmCommandMessage : WebSocketMessage
     {
-        [JsonPropertyName("session_id")]
         public required string SessionId { get; init; }
-
-        [JsonPropertyName("partition_number")]
         public required byte PartitionNumber { get; init; }
-
-        [JsonPropertyName("code")]
         public string? Code { get; init; }
     }
 
-    public record ArmAwayMessage : ArmCommandMessage
-    {
-        public override string Type => "arm_away";
-    }
-
-    public record ArmHomeMessage : ArmCommandMessage
-    {
-        public override string Type => "arm_home";
-    }
-
-    public record ArmNightMessage : ArmCommandMessage
-    {
-        public override string Type => "arm_night";
-    }
-
-    public record DisarmMessage : ArmCommandMessage
-    {
-        public override string Type => "disarm";
-    }
+    public record ArmAwayMessage : ArmCommandMessage;
+    public record ArmHomeMessage : ArmCommandMessage;
+    public record ArmNightMessage : ArmCommandMessage;
+    public record DisarmMessage : ArmCommandMessage;
 
     #endregion
 
@@ -55,45 +38,25 @@ namespace NeoHub.Api.WebSocket.Models
 
     public record FullStateMessage : WebSocketMessage
     {
-        public override string Type => "full_state";
-
-        [JsonPropertyName("sessions")]
         public required List<SessionDto> Sessions { get; init; }
     }
 
     public record PartitionUpdateMessage : WebSocketMessage
     {
-        public override string Type => "partition_update";
-
-        [JsonPropertyName("session_id")]
         public required string SessionId { get; init; }
-
-        [JsonPropertyName("partition_number")]
         public required byte PartitionNumber { get; init; }
-
-        [JsonPropertyName("status")]
         public required PartitionStatus Status { get; init; }
     }
 
     public record ZoneUpdateMessage : WebSocketMessage
     {
-        public override string Type => "zone_update";
-
-        [JsonPropertyName("session_id")]
         public required string SessionId { get; init; }
-
-        [JsonPropertyName("zone_number")]
         public required byte ZoneNumber { get; init; }
-
-        [JsonPropertyName("open")]
         public required bool Open { get; init; }
     }
 
     public record ErrorMessage : WebSocketMessage
     {
-        public override string Type => "error";
-
-        [JsonPropertyName("message")]
         public required string Message { get; init; }
     }
 
@@ -103,46 +66,25 @@ namespace NeoHub.Api.WebSocket.Models
 
     public record SessionDto
     {
-        [JsonPropertyName("session_id")]
         public required string SessionId { get; init; }
-
-        [JsonPropertyName("name")]
         public required string Name { get; init; }
-
-        [JsonPropertyName("partitions")]
         public required List<PartitionDto> Partitions { get; init; }
-
-        [JsonPropertyName("zones")]
         public required List<ZoneDto> Zones { get; init; }
     }
 
     public record PartitionDto
     {
-        [JsonPropertyName("partition_number")]
         public required byte PartitionNumber { get; init; }
-
-        [JsonPropertyName("name")]
         public required string Name { get; init; }
-
-        [JsonPropertyName("status")]
         public required PartitionStatus Status { get; init; }
     }
 
     public record ZoneDto
     {
-        [JsonPropertyName("zone_number")]
         public required byte ZoneNumber { get; init; }
-
-        [JsonPropertyName("name")]
         public required string Name { get; init; }
-
-        [JsonPropertyName("device_class")]
         public required string DeviceClass { get; init; }
-
-        [JsonPropertyName("open")]
         public required bool Open { get; init; }
-
-        [JsonPropertyName("partitions")]
         public required List<byte> Partitions { get; init; }
     }
 
