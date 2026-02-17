@@ -55,6 +55,14 @@
                     </MudText>
                 }
                 <MudText Typo="Typo.h5" Class="mb-3">Partitions</MudText>
+                @if (!session.Partitions.Any())
+                {
+                    <MudAlert Severity="Severity.Info" Class="mb-6">
+                        <MudText>Waiting for partition data from panel...</MudText>
+                    </MudAlert>
+                }
+                else
+                {
                 <MudGrid Class="mb-6">
                     @foreach (var (partitionNumber, partition) in session.Partitions.OrderBy(p => p.Key))
                     {
@@ -128,6 +136,7 @@
                         </MudItem>
                     }
                 </MudGrid>
+                }
 
                 <MudText Typo="Typo.h5" Class="mb-3">All Zones (@session.Zones.Count)</MudText>
                 <MudPaper Class="pa-4">

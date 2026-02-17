@@ -2,11 +2,17 @@
 window.exitDelayBeep = {
     audioContext: null,
     beepInterval: null,
+    isUrgent: false,
 
-    // Start beeping at 1-second intervals
-    startBeeping: function() {
+    // Start beeping (500ms interval when urgent, 1000ms when normal)
+    startBeeping: function(urgent) {
+        this.isUrgent = !!urgent;
+        var interval = this.isUrgent ? 500 : 1000;
+
+        // If already beeping, restart with new interval
         if (this.beepInterval) {
-            return; // Already beeping
+            clearInterval(this.beepInterval);
+            this.beepInterval = null;
         }
 
         // Create audio context on first use
@@ -22,10 +28,10 @@ window.exitDelayBeep = {
         // Play immediately
         this.playBeep();
 
-        // Then every second
+        // Then at the appropriate interval
         this.beepInterval = setInterval(() => {
             this.playBeep();
-        }, 1000);
+        }, interval);
     },
 
     // Stop beeping
@@ -34,9 +40,10 @@ window.exitDelayBeep = {
             clearInterval(this.beepInterval);
             this.beepInterval = null;
         }
+        this.isUrgent = false;
     },
 
-    // Play a single beep (800Hz for 100ms)
+    // Play a single beep (higher pitch when urgent)
     playBeep: function() {
         if (!this.audioContext) {
             this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -48,7 +55,7 @@ window.exitDelayBeep = {
         oscillator.connect(gainNode);
         gainNode.connect(this.audioContext.destination);
 
-        oscillator.frequency.value = 800; // 800Hz beep
+        oscillator.frequency.value = this.isUrgent ? 1200 : 800;
         oscillator.type = 'sine';
 
         gainNode.gain.setValueAtTime(0.3, this.audioContext.currentTime);

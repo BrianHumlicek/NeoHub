@@ -62,10 +62,11 @@ h1:focus {
 
 /* Exit delay banner */
 .exit-delay-banner {
-    position: fixed;
+    position: sticky;
     top: 0;
     left: 0;
     right: 0;
+    z-index: 9999;
     border-radius: 0 !important;
     margin: 0;
 }
@@ -86,10 +87,6 @@ h1:focus {
 .exit-delay-urgent {
     animation: blink 1s infinite;
     font-weight: bold;
-}
-
-.exit-delay-active {
-    margin-top: 52px;
 }
 
 /* Partition arming pulse animation */

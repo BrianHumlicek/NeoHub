@@ -21,21 +21,23 @@
         .SelectMany(sessionId =>
         {
             var session = PanelState.GetSession(sessionId);
-            return session?.Partitions.Values
+            if (session == null)
+                return Enumerable.Empty<(string SessionId, PartitionState Partition)>();
+
+            return session.Partitions.Values
                 .Where(p => p.ExitDelayActive && p.ExitDelayRemaining.HasValue && p.ExitDelayRemaining.Value > TimeSpan.Zero)
-                .Select(p => new { SessionId = sessionId, Partition = p })
-                ?? Enumerable.Empty<dynamic>();
+                .Select(p => (SessionId: sessionId, Partition: p));
         })
-        .OrderBy(item => ((PartitionState)item.Partition).ExitDelayRemaining) // Shortest duration first
+        .OrderBy(item => item.Partition.ExitDelayRemaining)
         .ToList();
 }
 
 @for (int i = 0; i < activeDelays.Count; i++)
 {
     var item = activeDelays[i];
-    var partition = item.Partition as PartitionState;
-    var sessionId = item.SessionId as string;
-    var remaining = partition!.ExitDelayRemaining!.Value;
+    var partition = item.Partition;
+    var sessionId = item.SessionId;
+    var remaining = partition.ExitDelayRemaining!.Value;
     var severity = partition.ExitDelayUrgent ? Severity.Error : Severity.Warning;
     var icon = partition.ExitDelayUrgent ? Icons.Material.Filled.Warning : Icons.Material.Filled.Timer;
     // Shortest delay (index 0) gets highest z-index
@@ -63,7 +65,7 @@
     </MudAlert>
 }
 
-<div class="page @(activeDelays.Any() ? "exit-delay-active" : "")">
+<div class="page">
     <div class="sidebar">
         <NavMenu />
     </div>
@@ -88,6 +90,7 @@
 @code {
     private Timer? _refreshTimer;
     private bool _isBeeping = false;
+    private bool _wasUrgent = false;
 
     protected override void OnInitialized()
     {
@@ -126,20 +129,27 @@
 
     private async Task UpdateExitDelayBeepAsync(bool hasActiveDelay)
     {
-        var hasAudibleDelay = hasActiveDelay && SessionManager.GetActiveSessions()
-            .SelectMany(sessionId =>
-            {
-                var session = PanelState.GetSession(sessionId);
-                return session?.Partitions.Values ?? Enumerable.Empty<PartitionState>();
-            })
-            .Any(p => p.ExitDelayActive && p.ExitDelayAudible && p.ExitDelayRemaining.HasValue && p.ExitDelayRemaining.Value > TimeSpan.Zero);
+        var audiblePartitions = hasActiveDelay
+            ? SessionManager.GetActiveSessions()
+                .SelectMany(sessionId =>
+                {
+                    var session = PanelState.GetSession(sessionId);
+                    return session?.Partitions.Values ?? Enumerable.Empty<PartitionState>();
+                })
+                .Where(p => p.ExitDelayActive && p.ExitDelayAudible && p.ExitDelayRemaining.HasValue && p.ExitDelayRemaining.Value > TimeSpan.Zero)
+                .ToList()
+            : [];
 
-        if (hasAudibleDelay && !_isBeeping)
+        var hasAudibleDelay = audiblePartitions.Count > 0;
+        var isUrgent = audiblePartitions.Any(p => p.ExitDelayUrgent);
+
+        if (hasAudibleDelay && (!_isBeeping || _wasUrgent != isUrgent))
         {
             try
             {
-                await JS.InvokeVoidAsync("exitDelayBeep.startBeeping");
+                await JS.InvokeVoidAsync("exitDelayBeep.startBeeping", isUrgent);
                 _isBeeping = true;
+                _wasUrgent = isUrgent;
             }
             catch { }
         }
@@ -149,6 +159,7 @@
             {
                 await JS.InvokeVoidAsync("exitDelayBeep.stopBeeping");
                 _isBeeping = false;
+                _wasUrgent = false;
             }
             catch { }
         }
