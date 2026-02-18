@@ -21,11 +21,11 @@ using DSC.TLink.Serialization;
 
 namespace DSC.TLink.ITv2.Messages
 {
-    [ITv2Command(ITv2Command.Connection_Request_Access, isAppSequence: true)]
+    [ITv2Command(ITv2Command.Connection_Request_Access)]
     [CommandResponseTransaction]
-    public partial record RequestAccess : IMessageData
+    public partial record RequestAccess : IAppSequenceMessage
     {
-
+        public byte AppSequence { get; set; }
         [LeadingLengthArray]
         public byte[] Initializer { get; init; } = Array.Empty<byte>();
     }

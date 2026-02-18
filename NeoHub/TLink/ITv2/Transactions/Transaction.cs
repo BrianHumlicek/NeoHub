@@ -29,7 +29,7 @@ namespace DSC.TLink.ITv2.Transactions
         private Func<ITv2MessagePacket, CancellationToken, Task> _sendMessageDelegate;
 
         private byte localSequence, remoteSequence;
-        private byte? appSequence;
+        //private byte? appSequence;
         private IMessageData? _initiatingMessage;
         private Func<ITv2MessagePacket, bool> isCorrelated = new Func<ITv2MessagePacket, bool>(message => false);
 
@@ -51,7 +51,7 @@ namespace DSC.TLink.ITv2.Transactions
 
             remoteSequence = message.senderSequence;
             localSequence = message.receiverSequence;
-            appSequence = message.appSequence;
+            //appSequence = message.appSequence;
             isCorrelated = inboundCorrelataion;
             _initiatingMessage = message.messageData;
             await InitializeInboundAsync(linkedCts.Token);
@@ -64,7 +64,7 @@ namespace DSC.TLink.ITv2.Transactions
 
             localSequence = message.senderSequence;
             remoteSequence = message.receiverSequence;
-            appSequence = message.appSequence;
+            //appSequence = message.appSequence;
             isCorrelated = outboundCorrelataion;
             _initiatingMessage = message.messageData;
             await _sendMessageDelegate(message, linkedCts.Token);
@@ -89,15 +89,23 @@ namespace DSC.TLink.ITv2.Transactions
         protected Task SendMessageAsync(IMessageData messageData, CancellationToken cancellationToken)
         {
             // Link with timeout cancellation
+            //if (messageData is IAppSequenceMessage appSequencesMessage)
+            //{
+            //    appSequenceMessage.AppSequence = appSequence ?? throw new InvalidOperationException("AppSequence is not set for this transaction");
+            //}
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _timeoutCts.Token);
-            var message = new ITv2MessagePacket(localSequence, remoteSequence, appSequence, messageData);
+            var message = new ITv2MessagePacket(localSequence, remoteSequence, messageData);
             return _sendMessageDelegate(message, linkedCts.Token);
         }
         protected abstract Task<bool> TryProcessMessageAsync(ITv2MessagePacket message, CancellationToken cancellationToken);
 		protected abstract bool Pending { get; }
         protected abstract Task InitializeInboundAsync(CancellationToken cancellationToken);
 		protected abstract Task InitializeOutboundAsync(CancellationToken cancellationToken);
-        protected void SetResult(TransactionResult result) => _completionSource.TrySetResult(result);
+        protected void SetResult(TransactionResult result)
+        {
+            result.CommandMessage = InitiatingMessage;
+            _completionSource.TrySetResult(result);
+        }
         bool inboundCorrelataion(ITv2MessagePacket message) => message.senderSequence == remoteSequence;
         bool outboundCorrelataion(ITv2MessagePacket message) => message.receiverSequence == localSequence;
 

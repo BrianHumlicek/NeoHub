@@ -137,7 +137,7 @@ namespace DSC.TLink.ITv2
             /*Local methods*****************************************************/
             async Task executeInboundTransactionAsync(ITv2MessagePacket inboundMessagePacket)
             {
-                EnsureInboundReceiverSequence(ref inboundMessagePacket);
+                EnsureInboundMessageSequence(ref inboundMessagePacket);
                 var transaction = CreateTransaction(inboundMessagePacket.messageData);
                 await transaction.BeginInboundAsync(inboundMessagePacket, cancellation);
                 await completeTransactionAsync(transaction);
@@ -198,7 +198,6 @@ namespace DSC.TLink.ITv2
                     var messagePacket = await WaitForMessageAsync(linkedToken);
                     flushQueueTimer?.Change(Timeout.Infinite, Timeout.Infinite);
 
-                    _remoteSequence = messagePacket.senderSequence;
                     await handleInboundMessagePacket(messagePacket, continuation, linkedToken);
                 }
             }
@@ -242,7 +241,7 @@ namespace DSC.TLink.ITv2
                     _log.LogWarning($"Data: {ILoggerExtensions.Enumerable2HexString(defaultMessage.Data)}");
                 }
 
-                EnsureInboundReceiverSequence(ref messagePacket);
+                EnsureInboundMessageSequence(ref messagePacket);
 
                 var newTransaction = CreateTransaction(messagePacket.messageData);
                 
@@ -394,7 +393,9 @@ namespace DSC.TLink.ITv2
         async Task<ITv2MessagePacket> WaitForMessageAsync(CancellationToken cancellationToken)
         {
             var clientResult = await WaitForClientResultAsync(cancellationToken);
-            return ParseITv2Message(clientResult.Payload);
+            ITv2MessagePacket messagePacket = ParseITv2Message(clientResult.Payload);
+            _remoteSequence = messagePacket.senderSequence; //_remoteSequence shoud always track the latest sender sequence.
+            return messagePacket;
         }
 
         async Task<TLinkClient.TLinkReadResult> WaitForClientResultAsync(CancellationToken cancellationToken)
@@ -428,12 +429,11 @@ namespace DSC.TLink.ITv2
             // Sequence bytes track message ordering (wrap at 255)
             byte senderSeq = messageBytes.PopByte();      // Remote's incrementing counter
             byte receiverSeq = messageBytes.PopByte();    // Expected local sequence
-            (byte? appSeq, IMessageData messageData) = MessageFactory.DeserializeMessage(messageBytes);
+            IMessageData messageData = MessageFactory.DeserializeMessage(messageBytes);
 
             return new ITv2MessagePacket(
                 senderSequence:   senderSeq,
                 receiverSequence: receiverSeq,
-                appSequence:      appSeq,
                 messageData:      messageData);
         }
         Transaction CreateTransaction(IMessageData messageData) => TransactionFactory.CreateTransaction(messageData, _log, SendTransactionMessageAsync);
@@ -450,16 +450,19 @@ namespace DSC.TLink.ITv2
             var messageBytes = new List<byte>(
                 [messagePacket.senderSequence,
                  messagePacket.receiverSequence,
-                 ..messagePacket.messageData.Serialize(messagePacket.appSequence)
+                 ..MessageFactory.SerializeMessage(messagePacket.messageData)
                 ]);
             return messageBytes;
         }
-        void EnsureInboundReceiverSequence(ref ITv2MessagePacket inboundMessagePacket)
+        void EnsureInboundMessageSequence(ref ITv2MessagePacket inboundMessagePacket)
         {
-            if (inboundMessagePacket.appSequence.HasValue)
+            //This gets called every time a new inbound transaction is about to be created.
+            //This is when we update/sync the app sequence.
+            if (inboundMessagePacket.messageData is IAppSequenceMessage appSequenceMessage)
             {
-                _appSequence = inboundMessagePacket.appSequence.Value;
+                _appSequence = appSequenceMessage.AppSequence;
             }
+
             if (inboundMessagePacket.receiverSequence != _localSequence)
             {
                 inboundMessagePacket = inboundMessagePacket with { receiverSequence = (byte)_localSequence };
@@ -467,10 +470,13 @@ namespace DSC.TLink.ITv2
         }
         ITv2MessagePacket CreateNextOutboundMessagePacket(IMessageData messageData)
         {
+            if (messageData is IAppSequenceMessage appSequenceMessage)
+            {
+                appSequenceMessage.AppSequence = GetNextAppSequence();
+            }
             return new ITv2MessagePacket(
                 senderSequence: GetNextLocalSequence(),
                 receiverSequence: _remoteSequence,
-                appSequence: messageData.IsAppSequence ? GetNextAppSequence() : null,
                 messageData: messageData);
         }
         byte GetNextLocalSequence() => ++_localSequence;

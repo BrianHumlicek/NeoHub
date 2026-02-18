@@ -20,13 +20,14 @@ using DSC.TLink.Serialization;
 
 namespace DSC.TLink.ITv2.Messages
 {
-    [ITv2Command(ITv2Command.ModuleControl_Partition_Disarm_Control, isAppSequence: true)]
-    [SimpleAckTransaction]
-    public record PartitionDisarm : IMessageData
+	[ITv2Command(ITv2Command.ModuleControl_Partition_Disarm_Control)]
+	[SimpleAckTransaction]
+	public record PartitionDisarm : IAppSequenceMessage
 	{
-        [CompactInteger]
-        public int Partition { get; init; }
-        [BCDString]
-        public string AccessCode { get; init; } = String.Empty;
-    }
+		public byte AppSequence { get; set; }
+		[CompactInteger]
+		public int Partition { get; init; }
+		[BCDString]
+		public string AccessCode { get; init; } = String.Empty;
+	}
 }

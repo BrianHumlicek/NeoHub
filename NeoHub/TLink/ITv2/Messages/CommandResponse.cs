@@ -21,10 +21,11 @@ using DSC.TLink.Serialization;
 
 namespace DSC.TLink.ITv2.Messages
 {
-	[ITv2Command(ITv2Command.Command_Response, isAppSequence: true)]
-    [SimpleAckTransaction]
-	internal record CommandResponse : IMessageData
+	[ITv2Command(ITv2Command.Command_Response)]
+	[SimpleAckTransaction]
+	internal record CommandResponse : IAppSequenceMessage
 	{
-        public CommandResponseCode ResponseCode { get; init; }
+		public byte AppSequence { get; set; }
+		public CommandResponseCode ResponseCode { get; init; }
 	}
 }

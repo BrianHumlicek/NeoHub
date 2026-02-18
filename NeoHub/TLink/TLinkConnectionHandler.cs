@@ -46,9 +46,9 @@ namespace DSC.TLink
 
                 // Get scoped instances
                 var session = scope.ServiceProvider.GetRequiredService<ITv2Session>();
-                
+
                 // Get singleton instances
-                var sessionMediator = scope.ServiceProvider.GetRequiredService<SessionMediator>();
+                var notificationPublisher = scope.ServiceProvider.GetRequiredService<InboundNotificationPublisher>();
                 var sessionManager = scope.ServiceProvider.GetRequiredService<IITv2SessionManager>();
 
                 // Initialize the session
@@ -70,7 +70,7 @@ namespace DSC.TLink
                     
                     // Listen for messages and publish notifications
                     await session.ListenAsync(
-                        transactionResult => sessionMediator.PublishInboundMessage(sessionId, transactionResult),
+                        transactionResult => notificationPublisher.Publish(sessionId, transactionResult),
                         connection.ConnectionClosed);
                 }
                 finally

@@ -4,25 +4,26 @@ namespace DSC.TLink.ITv2.Transactions
 {
     public record TransactionResult
     {
+        public IMessageData CommandMessage { get; set; }
+        public IMessageData ResponseMessage { get; init; }
         public bool Success { get; init; }
-        public IMessageData MessageData { get; init; }
         public string? ErrorMessage { get; init; }
         public TransactionResult() 
         { 
                 Success = true;
-                MessageData = null!;
+                ResponseMessage = null!;
                 ErrorMessage = null;
         }
         public TransactionResult(IMessageData MessageData)
         {
             Success = true;
-            this.MessageData = MessageData;
+            this.ResponseMessage = MessageData;
             ErrorMessage = null;
         }
         public TransactionResult(string ErrorMessage)
         {
             Success = false;
-            MessageData = null!;
+            ResponseMessage = null!;
             this.ErrorMessage = ErrorMessage;
         }
     }

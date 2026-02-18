@@ -21,10 +21,11 @@ using DSC.TLink.Serialization;
 
 namespace DSC.TLink.ITv2.Messages
 {
-    [ITv2Command(ITv2Command.Connection_Open_Session, isAppSequence: true)]
+    [ITv2Command(ITv2Command.Connection_Open_Session)]
     [CommandResponseTransaction]
-    public record OpenSession : IMessageData
+    public record OpenSession : IAppSequenceMessage
     {
+        public byte AppSequence { get; set; }
         public Itv2PanelDeviceType DeviceType { get; init; }
         
         [FixedArray(2)]

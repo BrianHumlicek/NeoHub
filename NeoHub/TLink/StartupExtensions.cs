@@ -47,7 +47,8 @@ namespace DSC.TLink
 
             // Singleton services (shared across all connections)
             builder.Services.AddSingleton<IITv2SessionManager, ITv2SessionManager>();
-            builder.Services.AddSingleton<SessionMediator>();
+            builder.Services.AddSingleton<AppSequenceTransactionRegistry>();
+            builder.Services.AddSingleton<InboundNotificationPublisher>();
             builder.Services.AddSingleton<ITv2ConnectionHandler>();
 
             // Scoped services (per-connection)
