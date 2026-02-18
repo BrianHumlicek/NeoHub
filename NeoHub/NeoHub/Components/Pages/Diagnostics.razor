@@ -162,6 +162,8 @@
     private List<DiagnosticsLogEntry> filteredLogs = new();
     private List<CategoryRow> categoryRows = new();
 
+    private CancellationTokenSource _cts = new();
+
     protected override void OnInitialized()
     {
         settings = CloneSettings(SettingsMonitor.CurrentValue);
@@ -181,6 +183,7 @@
     {
         InvokeAsync(() =>
         {
+            if (_cts.IsCancellationRequested) return;
             allLogs.Add(entry);
 
             // Add new category if discovered
@@ -333,7 +336,9 @@
 
     public void Dispose()
     {
+        _cts.Cancel();
         LogService.LogReceived -= OnLogReceived;
+        _cts.Dispose();
     }
 
     #endregion

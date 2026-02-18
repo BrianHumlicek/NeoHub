@@ -77,7 +77,7 @@ namespace NeoHub.Services
                 if (response.Success)
                     return PanelCommandResult.Ok();
 
-                _logger.LogWarning("Command failed: {Error} {detail}", response.ErrorMessage, response.ErrorDetail);
+                _logger.LogWarning("Command failed: {Error} {Detail}", response.ErrorMessage, response.ErrorDetail);
                 string errorMessage = response.ErrorDetail ?? response.ErrorMessage ?? "Unknown error";
                 return PanelCommandResult.Error(errorMessage);
             }

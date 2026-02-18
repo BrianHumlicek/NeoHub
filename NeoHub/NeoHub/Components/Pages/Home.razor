@@ -278,23 +278,23 @@
             selectedSessionId = activeSessions.FirstOrDefault() ?? "";
     }
 
-    private Color GetZoneColor(ZoneState zone)
-    {
-        if (zone.IsTampered) return Color.Error;
-        if (zone.IsFaulted) return Color.Error;
-        if (zone.IsOpen) return Color.Warning;
-        if (zone.IsBypassed) return Color.Info;
-        return Color.Success;
-    }
+    private Color GetZoneColor(ZoneState zone) => zone switch
+	{
+		{ IsTampered: true } => Color.Error,
+		{ IsFaulted: true } => Color.Error,
+		{ IsOpen: true } => Color.Warning,
+		{ IsBypassed: true } => Color.Info,
+		_ => Color.Success
+	};
 
-    private string GetZoneIcon(ZoneState zone)
+    private string GetZoneIcon(ZoneState zone) => zone switch
     {
-        if (zone.IsTampered) return Icons.Material.Filled.Error;
-        if (zone.IsFaulted) return Icons.Material.Filled.Warning;
-        if (zone.IsOpen) return Icons.Material.Filled.LockOpen;
-        if (zone.IsBypassed) return Icons.Material.Filled.Block;
-        return Icons.Material.Filled.Lock;
-    }
+        { IsTampered: true } => Icons.Material.Filled.Error,
+        { IsFaulted: true } => Icons.Material.Filled.Warning,
+        { IsOpen: true } => Icons.Material.Filled.LockOpen,
+        { IsBypassed: true } => Icons.Material.Filled.Block,
+        _ => Icons.Material.Filled.Lock
+    };
 
     private string GetZoneTooltip(ZoneState zone)
     {
@@ -343,18 +343,15 @@
         };
     }
 
-    private Color GetPartitionChipColor(PartitionState partition)
+    private Color GetPartitionChipColor(PartitionState partition) => partition.EffectiveStatus switch
     {
-        return partition.EffectiveStatus switch
-        {
-            PartitionStatus.Arming => Color.Warning,
-            PartitionStatus.Pending => Color.Warning,
-            PartitionStatus.Triggered => Color.Error,
-            _ when partition.IsArmed => Color.Error,
-            _ when partition.IsReady => Color.Success,
-            _ => Color.Warning
-        };
-    }
+        PartitionStatus.Arming => Color.Warning,
+        PartitionStatus.Pending => Color.Warning,
+		PartitionStatus.Triggered => Color.Error,
+		_ when partition.IsArmed => Color.Error,
+		_ when partition.IsReady => Color.Success,
+		_ => Color.Warning
+	};
 
     private async Task ArmPartitionAsync(byte partition, ArmingMode mode)
     {

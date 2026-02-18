@@ -91,6 +91,7 @@
     private Timer? _refreshTimer;
     private bool _isBeeping = false;
     private bool _wasUrgent = false;
+    private CancellationTokenSource _cts = new();
 
     protected override void OnInitialized()
     {
@@ -99,10 +100,12 @@
         // Refresh UI every second for countdown and audio management
         _refreshTimer = new Timer(_ => InvokeAsync(async () =>
         {
-            var hasActiveDelay = HasActiveExitDelay();
-            await UpdateExitDelayBeepAsync(hasActiveDelay);
+            if (_cts.IsCancellationRequested) return;
 
-            if (hasActiveDelay)
+            var hasActiveDelay = HasActiveExitDelay();
+            await UpdateExitDelayBeepAsync(hasActiveDelay, _cts.Token);
+
+            if (hasActiveDelay && !_cts.Token.IsCancellationRequested)
                 StateHasChanged();
         }), null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
     }
@@ -111,8 +114,11 @@
     {
         InvokeAsync(async () =>
         {
-            await UpdateExitDelayBeepAsync(HasActiveExitDelay());
-            StateHasChanged();
+            if (_cts.IsCancellationRequested) return;
+
+            await UpdateExitDelayBeepAsync(HasActiveExitDelay(), _cts.Token);
+            if (!_cts.Token.IsCancellationRequested)
+                StateHasChanged();
         });
     }
 
@@ -127,8 +133,10 @@
             .Any(p => p.ExitDelayActive && p.ExitDelayRemaining.HasValue && p.ExitDelayRemaining.Value > TimeSpan.Zero);
     }
 
-    private async Task UpdateExitDelayBeepAsync(bool hasActiveDelay)
+    private async Task UpdateExitDelayBeepAsync(bool hasActiveDelay, CancellationToken token)
     {
+        if (token.IsCancellationRequested) return;
+
         var audiblePartitions = hasActiveDelay
             ? SessionManager.GetActiveSessions()
                 .SelectMany(sessionId =>
@@ -147,9 +155,12 @@
         {
             try
             {
-                await JS.InvokeVoidAsync("exitDelayBeep.startBeeping", isUrgent);
-                _isBeeping = true;
-                _wasUrgent = isUrgent;
+                if (!token.IsCancellationRequested)
+                {
+                    await JS.InvokeVoidAsync("exitDelayBeep.startBeeping", isUrgent);
+                    _isBeeping = true;
+                    _wasUrgent = isUrgent;
+                }
             }
             catch { }
         }
@@ -157,9 +168,12 @@
         {
             try
             {
-                await JS.InvokeVoidAsync("exitDelayBeep.stopBeeping");
-                _isBeeping = false;
-                _wasUrgent = false;
+                if (!token.IsCancellationRequested)
+                {
+                    await JS.InvokeVoidAsync("exitDelayBeep.stopBeeping");
+                    _isBeeping = false;
+                    _wasUrgent = false;
+                }
             }
             catch { }
         }
@@ -167,6 +181,7 @@
 
     public void Dispose()
     {
+        _cts.Cancel();
         _refreshTimer?.Dispose();
 
         if (_isBeeping)
@@ -179,5 +194,6 @@
         }
 
         PanelState.PartitionStateChanged -= OnPartitionStateChanged;
+        _cts.Dispose();
     }
 }

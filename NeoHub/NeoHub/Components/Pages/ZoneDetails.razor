@@ -122,6 +122,8 @@
     private List<ZoneState> zonesForPartition = new();
     private List<BreadcrumbItem> breadcrumbs = new();
 
+    private CancellationTokenSource _cts = new();
+
     protected override void OnInitialized()
     {
         breadcrumbs = new List<BreadcrumbItem>
@@ -155,6 +157,7 @@
     {
         InvokeAsync(() =>
         {
+            if (_cts.IsCancellationRequested) return;
             LoadData();
             StateHasChanged();
         });
@@ -180,7 +183,9 @@
 
     public void Dispose()
     {
+        _cts.Cancel();
         PanelState.PartitionStateChanged -= OnStateChanged;
         PanelState.ZoneStateChanged -= OnStateChanged;
+        _cts.Dispose();
     }
 }
