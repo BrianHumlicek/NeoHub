@@ -171,25 +171,34 @@ Program the following tags in section **[851]** for your chosen integration slot
 
 ### Programming Steps
 
-1. **Enter Installer Mode:** `*8` → Installer Code → `[851]`
+1. **Enable the TL-280**
+   - Enter [*][8][installer code][382] and set option 5 to ON. Press # to move back up to the configuration menu.
+   - Enter [300]. For subsections [001] to [004], program the subsection 02 to 06. If you also have a phone connection (some alarm installers use a phone connection to interface with their own communications boxes), keep option 1 enabled.
+   - Press # to move back to the configuration menu
 
-2. **Read Integration ID (`[422]`):**
+2. **Configure the TL-280:** Enter `[851]`
+   - Ensure that [021] is not set to 000000 or FFFFFF
+   - Ensure that [101] is not set to 000000 or FFFFFF
+   - Set [103] to the IP address of the system that the alarm will communicating with
+
+
+3. **Read Integration ID (`[422]`):**
    - Navigate to tag `[422]`
    - **Note:** This field is read-only and displays your panel's unique 12-digit Integration ID
    - Write down this value - you'll need to enter it in NeoHub's settings
    - Example: `123456789012`
 
-3. **Select Your Integration Slot:**
+4. **Select Your Integration Slot:**
    - Choose an available integration slot (1-4) that isn't already in use
    - Use `[423]` for Integration 1, `[450]` for Integration 2, `[477]` for Integration 3, or `[504]` for Integration 4
 
-4. **Program Type 1 Access Code:**
+5. **Program Type 1 Access Code:**
    - Navigate to your chosen integration tag (e.g., `[423]` for Integration 1)
    - Enter your 8-digit Type 1 code (e.g., `12345678`)
    - Press `#` to save
    - **Important:** Remember which slot you used and the code you entered
 
-5. **Program Type 2 Access Code (`[700]`-`[703]`):**
+6. **Program Type 2 Access Code (`[700]`-`[703]`):**
    - **Note:** Type 2 Access Code tags are specific to each integration slot
    - For your chosen integration slot, navigate to the appropriate starting tag
    - The 32-character hex key is split into 4 segments of 8 characters each
@@ -203,13 +212,17 @@ Program the following tags in section **[851]** for your chosen integration slot
    - Enter characters 25-32
    - Press `#` to save
 
-6. **Configure Network Settings:**
-   - Set the panel's IP address for the NeoHub server (section `[801]`)
-   - Set the port to `3072` (or your configured `ListenPort`)
+7. **Configure Network Settings.** For integration 1:
+   - Set [425] to 3, 4, and 5; this enables the system to operate over TCP with push notifications
+   - Set [426] to 3; this enables push notifications
+   - Set [428] to the IP address of the system that the alarm will communicating with
+   - Set [429] to 0C00 (port 3072)
 
-7. **Exit Installer Mode:** Press `*99`
+8. **Exit Installer Mode:** Press # several times
 
 > ⚠️ **Critical:** The values programmed in the panel **must exactly match** the values in your `userSettings.json` file.
+
+> ⚠️ **Critical:** If you need to reset your TL-280, enter *8, then your installation code, then 851 to configure the communicator, then 999 followed by 00. This only wipes settings under the [851] area and will not impact your partitions, zones, codes, etc.
 
 ---
 
