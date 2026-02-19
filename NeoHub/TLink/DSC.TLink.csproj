@@ -18,6 +18,7 @@
     <Compile Remove="DeviceHeaderInformation.cs" />
     <Compile Remove="LegacyInstructionHelper.cs" />
     <Compile Remove="TLInstructionHelper.cs" />
+    <Compile Remove="ITv2\ITv2Session_old.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -43,7 +43,7 @@ namespace DSC.TLink.ITv2.Transactions
         /// <summary>
         /// Create a transaction for the given message data using the registered attribute factory.
         /// </summary>
-        public static Transaction CreateTransaction(IMessageData messageData, ILogger log, Func<ITv2MessagePacket, CancellationToken, Task> sendMessageDelegate)
+        public static Transaction CreateTransaction(IMessageData messageData, ILogger log, Func<ITv2MessagePacket, CancellationToken, Task<Result>> sendMessageDelegate)
         {
             if (messageData == null) throw new ArgumentNullException(nameof(messageData));
             if (log == null) throw new ArgumentNullException(nameof(log));
@@ -64,6 +64,6 @@ namespace DSC.TLink.ITv2.Transactions
     }
     internal interface ICreateTransaction
     {
-        Transaction CreateTransaction(ILogger log, Func<ITv2MessagePacket, CancellationToken, Task> sendMessageDelegate);
+        Transaction CreateTransaction(ILogger log, Func<ITv2MessagePacket, CancellationToken, Task<Result>> sendMessageDelegate);
     }
 }

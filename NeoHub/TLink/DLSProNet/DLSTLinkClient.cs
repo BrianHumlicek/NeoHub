@@ -22,10 +22,13 @@ using System.Security.Cryptography;
 
 namespace DSC.TLink.DLSProNet
 {
-	internal class DLSTLinkClient : TLinkClient, IDisposable
+	// TODO: DLSTLinkClient needs to be updated to use TLinkTransport instead of the removed TLinkClient
+	// internal class DLSTLinkClient : TLinkClient, IDisposable
+	internal class DLSTLinkClient : IDisposable
 	{
 		readonly Aes AES = Aes.Create();
 		bool encryptionActive = false;
+		/*
 		public DLSTLinkClient(IDuplexPipe transport, ILogger<TLinkClient> log) : base(transport, log)
 		{
 		}
@@ -35,6 +38,7 @@ namespace DSC.TLink.DLSProNet
 			encryptionActive = true;
 		}
 		public void DeactivateEncryption() => encryptionActive = false;
+		/*
 		protected override async Task sendPacketAsync(byte[] packet, CancellationToken cancellationToken)
 		{
 			if (encryptionActive)
@@ -75,6 +79,7 @@ namespace DSC.TLink.DLSProNet
 
 			return base.tryGetFullPacketSlice(packetSlice, out packetSlice);
 		}
+		*/
 		public void Dispose()
 		{
 			AES.Dispose();

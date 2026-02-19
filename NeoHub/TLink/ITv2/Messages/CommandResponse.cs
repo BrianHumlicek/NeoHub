@@ -23,9 +23,9 @@ namespace DSC.TLink.ITv2.Messages
 {
 	[ITv2Command(ITv2Command.Command_Response)]
 	[SimpleAckTransaction]
-	internal record CommandResponse : IAppSequenceMessage
+	internal record CommandResponse : ICommandMessageData
 	{
-		public byte AppSequence { get; set; }
+		public byte CorrelationID { get; set; }
 		public CommandResponseCode ResponseCode { get; init; }
 	}
 }

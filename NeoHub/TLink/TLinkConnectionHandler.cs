@@ -16,77 +16,87 @@
 
 using DSC.TLink.ITv2;
 using DSC.TLink.ITv2.MediatR;
+using DSC.TLink.ITv2.Messages;
+using MediatR;
 using Microsoft.AspNetCore.Connections;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
-namespace DSC.TLink
+namespace DSC.TLink;
+
+internal class ITv2ConnectionHandler : ConnectionHandler
 {
-    internal class ITv2ConnectionHandler : ConnectionHandler
+    private readonly IServiceProvider _services;
+    private readonly ILogger<ITv2ConnectionHandler> _log;
+
+    public ITv2ConnectionHandler(IServiceProvider services, ILogger<ITv2ConnectionHandler> log)
     {
-        private readonly IServiceProvider _serviceProvider;
-        private readonly ILogger<ITv2ConnectionHandler> _log;
+        _services = services;
+        _log = log;
+    }
 
-        public ITv2ConnectionHandler(
-            IServiceProvider serviceProvider,
-            ILogger<ITv2ConnectionHandler> log)
-        {
-            _serviceProvider = serviceProvider;
-            _log = log;
-        }
+    public override async Task OnConnectedAsync(ConnectionContext connection)
+    {
+        _log.LogInformation("Connection from {RemoteEndPoint}", connection.RemoteEndPoint);
 
-        public override async Task OnConnectedAsync(ConnectionContext connection)
+        try
         {
-            _log.LogInformation("Connection request from {RemoteEndPoint}", connection.RemoteEndPoint);
+            await using var scope = _services.CreateAsyncScope();
+            var settings = scope.ServiceProvider.GetRequiredService<IOptions<ITv2Settings>>().Value;
+            var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
+            var sessionManager = scope.ServiceProvider.GetRequiredService<IITv2SessionManager>();
+
+            await using var transport = new TLinkTransport(
+                connection.Transport,
+                scope.ServiceProvider.GetRequiredService<ILogger<TLinkTransport>>());
+
+            var sessionResult = await ITv2Session.CreateAsync(
+                transport, settings,
+                scope.ServiceProvider.GetRequiredService<ILogger<ITv2Session>>(),
+                mediator,
+                connection.ConnectionClosed);
+
+            if (sessionResult.IsFailure)
+            {
+                _log.LogError("Session creation failed: {Error}", sessionResult.Error);
+                return;
+            }
+
+            await using var session = sessionResult.Value;
+            sessionManager.RegisterSession(session.SessionId, session);
 
             try
             {
-                // Create a new scope per connection
-                await using var scope = _serviceProvider.CreateAsyncScope();
-
-                // Get scoped instances
-                var session = scope.ServiceProvider.GetRequiredService<ITv2Session>();
-
-                // Get singleton instances
-                var notificationPublisher = scope.ServiceProvider.GetRequiredService<InboundNotificationPublisher>();
-                var sessionManager = scope.ServiceProvider.GetRequiredService<IITv2SessionManager>();
-
-                // Initialize the session
-                var sessionConnected = await session.InitializeSession(connection.Transport, connection.ConnectionClosed);
-
-                if (!sessionConnected)
+                await foreach (var message in session.GetNotificationsAsync(connection.ConnectionClosed))
                 {
-                    _log.LogError("Session failed to properly initialize.  Closing connection.");
-                    return;
+                    await PublishNotificationAsync(mediator, session.SessionId, message);
                 }
-
-                // Register session for command routing
-                sessionManager.RegisterSession(session.SessionID, session);
-
-                try
-                {
-                    // Create a closure that captures sessionId for publishing
-                    var sessionId = session.SessionID;
-                    
-                    // Listen for messages and publish notifications
-                    await session.ListenAsync(
-                        transactionResult => notificationPublisher.Publish(sessionId, transactionResult),
-                        connection.ConnectionClosed);
-                }
-                finally
-                {
-                    // Cleanup: unregister session
-                    sessionManager.UnregisterSession(session.SessionID);
-                }
-            }
-            catch (Exception ex)
-            {
-                _log.LogError(ex, "ITv2 connection error");
             }
             finally
             {
-                _log.LogInformation("TLink disconnected from {RemoteEndPoint}", connection.RemoteEndPoint);
+                sessionManager.UnregisterSession(session.SessionId);
             }
         }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Connection error");
+        }
+        finally
+        {
+            _log.LogInformation("Disconnected {RemoteEndPoint}", connection.RemoteEndPoint);
+        }
+    }
+
+    private static async Task PublishNotificationAsync(
+        IMediator mediator, string sessionId, IMessageData message)
+    {
+        var messageType = message.GetType();
+        var notificationType = typeof(SessionNotification<>).MakeGenericType(messageType);
+        var notification = Activator.CreateInstance(notificationType, sessionId, message, DateTime.UtcNow);
+
+        if (notification is not null)
+            await mediator.Publish(notification);
     }
 }

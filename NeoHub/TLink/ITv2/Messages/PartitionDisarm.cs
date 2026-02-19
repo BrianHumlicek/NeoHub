@@ -22,9 +22,9 @@ namespace DSC.TLink.ITv2.Messages
 {
 	[ITv2Command(ITv2Command.ModuleControl_Partition_Disarm_Control)]
 	[SimpleAckTransaction]
-	public record PartitionDisarm : IAppSequenceMessage
+	public record PartitionDisarm : ICommandMessageData
 	{
-		public byte AppSequence { get; set; }
+		public byte CorrelationID { get; set; }
 		[CompactInteger]
 		public int Partition { get; init; }
 		[BCDString]

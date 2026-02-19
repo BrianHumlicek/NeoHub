@@ -23,27 +23,27 @@ namespace DSC.TLink.ITv2.Transactions
     /// - OnTimeout() called if transaction doesn't complete in time
     /// - Session periodically cleans up timed-out transactions
     /// </summary>
-    internal abstract class Transaction : IDisposable
+	internal abstract class Transaction : IDisposable
 	{
-        private ILogger _log;
-        private Func<ITv2MessagePacket, CancellationToken, Task> _sendMessageDelegate;
+		private ILogger _log;
+		private Func<ITv2MessagePacket, CancellationToken, Task<Result>> _sendMessageDelegate;
 
-        private byte localSequence, remoteSequence;
-        //private byte? appSequence;
-        private IMessageData? _initiatingMessage;
-        private Func<ITv2MessagePacket, bool> isCorrelated = new Func<ITv2MessagePacket, bool>(message => false);
+		private byte localSequence, remoteSequence;
+		//private byte? appSequence;
+		private IMessageData? _initiatingMessage;
+		private Func<ITv2MessagePacket, bool> isCorrelated = new Func<ITv2MessagePacket, bool>(message => false);
 
-        // Timeout infrastructure
-        private readonly TimeSpan _timeout;
+		// Timeout infrastructure
+		private readonly TimeSpan _timeout;
 		private readonly CancellationTokenSource _timeoutCts = new();
 
-        private TaskCompletionSource<TransactionResult> _completionSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        protected Transaction(ILogger log, Func<ITv2MessagePacket, CancellationToken, Task> sendMessageDelegate, TimeSpan? timeout = null)
+		private TaskCompletionSource<TransactionResult> _completionSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		protected Transaction(ILogger log, Func<ITv2MessagePacket, CancellationToken, Task<Result>> sendMessageDelegate, TimeSpan? timeout = null)
 		{
-            _log = log;
-            _sendMessageDelegate = sendMessageDelegate;
-            _timeout = timeout ?? Timeout.InfiniteTimeSpan;
-        }
+			_log = log;
+			_sendMessageDelegate = sendMessageDelegate;
+			_timeout = timeout ?? Timeout.InfiniteTimeSpan;
+		}
         public async Task BeginInboundAsync(ITv2MessagePacket message, CancellationToken cancellationToken)
         {
             _timeoutCts.CancelAfter(_timeout);
@@ -67,7 +67,12 @@ namespace DSC.TLink.ITv2.Transactions
             //appSequence = message.appSequence;
             isCorrelated = outboundCorrelataion;
             _initiatingMessage = message.messageData;
-            await _sendMessageDelegate(message, linkedCts.Token);
+            var sendResult = await _sendMessageDelegate(message, linkedCts.Token);
+            if (sendResult.IsFailure)
+            {
+                Abort($"Send failed: {sendResult.Error}");
+                return;
+            }
             await InitializeOutboundAsync(linkedCts.Token);
         }
 
@@ -86,16 +91,14 @@ namespace DSC.TLink.ITv2.Transactions
         public Task<TransactionResult> Result => _completionSource.Task;
         protected ILogger log => _log;
         protected IMessageData InitiatingMessage => _initiatingMessage ?? throw new InvalidOperationException($"Cannot access {nameof(InitiatingMessage)} before sending or receiving");
-        protected Task SendMessageAsync(IMessageData messageData, CancellationToken cancellationToken)
+        protected async Task<Result> SendMessageAsync(IMessageData messageData, CancellationToken cancellationToken)
         {
-            // Link with timeout cancellation
-            //if (messageData is IAppSequenceMessage appSequencesMessage)
-            //{
-            //    appSequenceMessage.AppSequence = appSequence ?? throw new InvalidOperationException("AppSequence is not set for this transaction");
-            //}
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _timeoutCts.Token);
             var message = new ITv2MessagePacket(localSequence, remoteSequence, messageData);
-            return _sendMessageDelegate(message, linkedCts.Token);
+            var result = await _sendMessageDelegate(message, linkedCts.Token);
+            if (result.IsFailure)
+                Abort($"Send failed: {result.Error}");
+            return result;
         }
         protected abstract Task<bool> TryProcessMessageAsync(ITv2MessagePacket message, CancellationToken cancellationToken);
 		protected abstract bool Pending { get; }
@@ -103,7 +106,7 @@ namespace DSC.TLink.ITv2.Transactions
 		protected abstract Task InitializeOutboundAsync(CancellationToken cancellationToken);
         protected void SetResult(TransactionResult result)
         {
-            result.CommandMessage = InitiatingMessage;
+            result.InitiatingMessage = InitiatingMessage;
             _completionSource.TrySetResult(result);
         }
         bool inboundCorrelataion(ITv2MessagePacket message) => message.senderSequence == remoteSequence;

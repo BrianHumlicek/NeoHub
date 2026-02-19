@@ -17,16 +17,17 @@
 using DSC.TLink.ITv2.Enumerations;
 using DSC.TLink.ITv2.Transactions;
 using DSC.TLink.Serialization;
+using MediatR;
 
 
 namespace DSC.TLink.ITv2.Messages
 {
     [ITv2Command(ITv2Command.Connection_Request_Access)]
     [CommandResponseTransaction]
-    public partial record RequestAccess : IAppSequenceMessage
+    public partial record RequestAccess : CommandMessageData
     {
-        public byte AppSequence { get; set; }
         [LeadingLengthArray]
         public byte[] Initializer { get; init; } = Array.Empty<byte>();
+        public override bool IsAsynchronous => false;
     }
 }

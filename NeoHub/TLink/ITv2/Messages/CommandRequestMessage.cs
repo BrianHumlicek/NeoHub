@@ -6,9 +6,9 @@ namespace DSC.TLink.ITv2.Messages
 {
     [ITv2Command(ITv2Command.ModuleStatus_Command_Request)]
     [CommandRequestTransaction]
-    public record CommandRequestMessage : IAppSequenceMessage
+    public record CommandRequestMessage : ICommandMessageData
     {
-        public byte AppSequence { get; set; }
+        public byte CorrelationID { get; set; }
         public ITv2Command CommandRequest { get; init; }
         public byte[] Data { get; init; } = Array.Empty<byte>();
     }

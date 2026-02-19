@@ -44,7 +44,7 @@ namespace DSC.TLink.ITv2.Transactions
 	{
 		private State _state;
 
-		public SimpleAckTransaction(ILogger log, Func<ITv2MessagePacket, CancellationToken, Task> sendMessageDelegate, TimeSpan? timeout = null) 
+		public SimpleAckTransaction(ILogger log, Func<ITv2MessagePacket, CancellationToken, Task<Result>> sendMessageDelegate, TimeSpan? timeout = null)
 			: base(log, sendMessageDelegate, timeout)
 		{
 			_state = State.Initial;
@@ -61,9 +61,10 @@ namespace DSC.TLink.ITv2.Transactions
 			// Inbound: Remote sent us a message, send SimpleAck back
 			log.LogTrace("SimpleAck transaction: received message, sending ack");
 			_state = State.SendingSimpleAck;
-			await SendMessageAsync(new SimpleAck(), cancellationToken);
+			var sendResult = await SendMessageAsync(new SimpleAck(), cancellationToken);
+			if (sendResult.IsFailure) return;
 			_state = State.Complete;
-            SetResult(new TransactionResult(InitiatingMessage));
+			SetResult(new TransactionResult(InitiatingMessage));
 			log.LogDebug("SimpleAck transaction completed (inbound)");
 		}
 

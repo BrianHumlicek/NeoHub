@@ -24,7 +24,7 @@ namespace DSC.TLink.DLSProNet
 	public class DLSProNetAPI : IDisposable
 	{
 		ILogger log;
-		TLinkClient dlsTLinkClient;
+		// TLinkClient dlsTLinkClient;
 		System.Timers.Timer heartbeat;
 		public DLSProNetAPI(ILogger logger)
 		{
@@ -54,7 +54,7 @@ namespace DSC.TLink.DLSProNet
 			//}
 
 			byte dataMode = 0x01;
-			dlsTLinkClient.DefaultHeader = new byte[] { dataMode, installerCode.HighByte(), installerCode.LowByte() };
+			// dlsTLinkClient.DefaultHeader = new byte[] { dataMode, installerCode.HighByte(), installerCode.LowByte() };
 
 			heartbeat.Start();
 			log?.LogInformation($"{nameof(DLSProNetAPI)} open");

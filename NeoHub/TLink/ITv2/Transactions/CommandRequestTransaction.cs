@@ -41,7 +41,7 @@ namespace DSC.TLink.ITv2.Transactions
         private ITv2Command _expectedResponseCommand;
         public CommandRequestTransaction(
             ILogger log,
-            Func<ITv2MessagePacket, CancellationToken, Task> sendMessage,
+            Func<ITv2MessagePacket, CancellationToken, Task<Result>> sendMessage,
             TimeSpan? timeout = null)
             : base(log, sendMessage, timeout)
         {

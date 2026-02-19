@@ -5,9 +5,9 @@ namespace DSC.TLink.ITv2.Messages
 {
     [ITv2Command(Enumerations.ITv2Command.Notification_Text)]
     [SimpleAckTransaction]
-    public record NotificationText : IAppSequenceMessage
+    public record NotificationText : ICommandMessageData
     {
-        public byte AppSequence { get; set; }
+        public byte CorrelationID { get; set; }
         [UnicodeString]
         public string Message { get; init; } = String.Empty;
     }

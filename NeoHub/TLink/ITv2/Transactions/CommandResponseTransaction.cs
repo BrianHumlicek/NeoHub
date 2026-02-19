@@ -23,7 +23,7 @@ namespace DSC.TLink.ITv2.Transactions
 		private State _state;
 		private CommandResponseCode? _responseCode;
 
-		public CommandResponseTransaction(ILogger log, Func<ITv2MessagePacket, CancellationToken, Task> sendMessageDelegate, TimeSpan? timeout = null) 
+		public CommandResponseTransaction(ILogger log, Func<ITv2MessagePacket, CancellationToken, Task<Result>> sendMessageDelegate, TimeSpan? timeout = null)
 			: base(log, sendMessageDelegate, timeout)
 		{
 			_state = State.Initial;
@@ -37,10 +37,11 @@ namespace DSC.TLink.ITv2.Transactions
         };
 
 
-        protected override async Task InitializeInboundAsync(CancellationToken cancellationToken)
+		protected override async Task InitializeInboundAsync(CancellationToken cancellationToken)
 		{
 			// Inbound: Remote sent us a command, send CommandResponse back
-			await SendMessageAsync(new CommandResponse { ResponseCode = CommandResponseCode.Success }, cancellationToken);
+			var sendResult = await SendMessageAsync(new CommandResponse { ResponseCode = CommandResponseCode.Success }, cancellationToken);
+			if (sendResult.IsFailure) return;
 			_state = State.AwaitingSimpleAck;
 		}
 
@@ -78,7 +79,8 @@ namespace DSC.TLink.ITv2.Transactions
                     }
 
 					// Send SimpleAck to complete transaction
-					await SendMessageAsync(new SimpleAck(), cancellationToken);
+					var sendResult = await SendMessageAsync(new SimpleAck(), cancellationToken);
+					if (sendResult.IsFailure) return true;
 					_state = State.Complete;
 					log.LogDebug("CommandResponse transaction completed");
 					SetResult(new TransactionResult());

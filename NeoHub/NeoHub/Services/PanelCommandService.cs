@@ -68,18 +68,19 @@ namespace NeoHub.Services
         {
             try
             {
-                SessionResponse response = await _mediator.Send(new SessionCommand
+                var result = await _mediator.Send(new SessionCommand
                 {
                     SessionID = sessionId,
                     MessageData = message
                 });
 
-                if (response.Success)
-                    return PanelCommandResult.Ok();
-
-                _logger.LogWarning("Command failed: {Error} {Detail}", response.ErrorMessage, response.ErrorDetail);
-                string errorMessage = response.ErrorDetail ?? response.ErrorMessage ?? "Unknown error";
-                return PanelCommandResult.Error(errorMessage);
+                return result.Match(
+                    onSuccess: _ => PanelCommandResult.Ok(),
+                    onFailure: error =>
+                    {
+                        _logger.LogWarning("Command failed: {Error}", error.Message);
+                        return PanelCommandResult.Error(error.Message);
+                    });
             }
             catch (Exception ex)
             {

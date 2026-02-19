@@ -47,6 +47,23 @@ public readonly struct Result<T>
     public TResult Match<TResult>(Func<T, TResult> onSuccess, Func<TLinkError, TResult> onFailure) =>
         IsSuccess ? onSuccess(_value) : onFailure(_error!.Value);
 
+    /// <summary>
+    /// Converts this Result&lt;T&gt; to a plain Result, discarding the value.
+    /// </summary>
+    public Result ToResult() => IsSuccess ? Result.Ok() : Result.Fail(_error!.Value);
+
+    /// <summary>
+    /// Creates a Result&lt;T&gt; from a Result, providing a value for the success case.
+    /// </summary>
+    public static Result<T> FromResult(Result result, T value) =>
+        result.IsSuccess ? Ok(value) : Fail(result.Error!.Value);
+
+    /// <summary>
+    /// Creates a Result&lt;T&gt; from a Result, using a factory to create the value only if successful.
+    /// </summary>
+    public static Result<T> FromResult(Result result, Func<T> valueFactory) =>
+        result.IsSuccess ? Ok(valueFactory()) : Fail(result.Error!.Value);
+
     // Implicit conversions for ergonomic usage
     public static implicit operator Result<T>(T value) => new(value);
     public static implicit operator Result<T>(TLinkError error) => new(error);

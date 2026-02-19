@@ -4,7 +4,7 @@ namespace DSC.TLink.ITv2.Transactions
 {
     public record TransactionResult
     {
-        public IMessageData CommandMessage { get; set; }
+        public IMessageData InitiatingMessage { get; set; }
         public IMessageData ResponseMessage { get; init; }
         public bool Success { get; init; }
         public string? ErrorMessage { get; init; }

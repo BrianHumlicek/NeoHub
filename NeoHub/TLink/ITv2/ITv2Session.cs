@@ -1,511 +1,384 @@
-﻿// DSC TLink - a communications library for DSC Powerseries NEO alarm panels
-// Copyright (C) 2024 Brian Humlicek
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-using DSC.TLink.Extensions;
-using DSC.TLink.ITv2.Encryption;
+﻿using DSC.TLink.ITv2.Encryption;
 using DSC.TLink.ITv2.Enumerations;
 using DSC.TLink.ITv2.Messages;
-using DSC.TLink.ITv2.Transactions;
+using DSC.TLink.ITv2.MediatR;
+using DSC.TLink.Extensions;
+using MediatR;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using System.IO.Pipelines;
+using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using System.Text;
+using DSC.TLink.ITv2.Transactions;
 
 namespace DSC.TLink.ITv2
 {
-    internal class ITv2Session : IDisposable
+    internal partial class ITv2Session : IITv2Session
     {
-        private readonly ILogger _log;
-        private readonly TLinkClient _tlinkClient;
-        private readonly ITv2Settings _itv2Settings;
-        private readonly List<Transaction> _pendingTransactions = new();
-        private readonly SemaphoreSlim _transactionSemaphore = new SemaphoreSlim(1, 1);
-        private readonly TaskCompletionSource flushQueueTCS = new TaskCompletionSource();
-        private readonly CancellationTokenSource _shutdownCts = new CancellationTokenSource();
+        private readonly ITLinkTransport _transport;
+        private readonly ITv2Settings _settings;
+        private readonly ILogger<ITv2Session> _logger;
+        private readonly IMediator _mediator;
 
-        private string? _sessionID;
-        private byte _localSequence = 1, _appSequence;
-        private byte _remoteSequence;
+        private SessionState _state = SessionState.WaitingForOpenSession;
         private EncryptionHandler? _encryptionHandler;
-        private sessionState _sessionState;
+        private string _sessionId = null!;
 
-        public ITv2Session(
-            TLinkClient tlinkClient,
-            IOptions<ITv2Settings> settingsOptions, 
-            ILogger<ITv2Session> logger)
+        private byte _localSequence = 1;
+        private byte _remoteSequence;
+        private byte _commandSequence;
+
+        private IAsyncEnumerator<Result<TLinkMessage>>? _reader;
+        private readonly SemaphoreSlim _sendLock = new(1, 1);
+        private readonly CancellationTokenSource _shutdownCts = new();
+
+        private readonly ConcurrentDictionary<byte, PendingCommand> _pendingCommands = new();
+        private readonly ConcurrentQueue<IMessageData> _notifications = new();
+
+        private ITv2Session(ITLinkTransport transport, ITv2Settings settings, ILogger<ITv2Session> logger, IMediator mediator)
         {
-            _tlinkClient = tlinkClient ?? throw new ArgumentNullException(nameof(tlinkClient));
-            _itv2Settings = settingsOptions.Value ?? throw new ArgumentNullException(nameof(settingsOptions));
-            _log = logger ?? throw new ArgumentNullException(nameof(logger));
-            _sessionState = sessionState.Uninitialized;
+            _transport = transport;
+            _settings = settings;
+            _logger = logger;
+            _mediator = mediator;
         }
 
-        public string SessionID => _sessionID ?? throw new InvalidOperationException($"Session must be initialized to get property {nameof(SessionID)}");
+        public string SessionId => _sessionId;
 
-        public async Task<bool> InitializeSession(IDuplexPipe transport, CancellationToken cancellationToken = default)
+        internal static async Task<Result<ITv2Session>> CreateAsync(
+            ITLinkTransport transport, 
+            ITv2Settings settings, 
+            ILogger<ITv2Session> logger,
+            IMediator mediator,
+            CancellationToken ct)
         {
-            if (_sessionState != sessionState.Uninitialized)
-                throw new InvalidOperationException("Session must be uninitialized.");
-            try
-            {
-                _tlinkClient.InitializeTransport(transport);
-
-                // Combine external token with internal shutdown token
-                using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdownCts.Token);
-                var linkedToken = linkedCts.Token;
-
-                var clientResult = await WaitForClientResultAsync(linkedToken);
-
-                //This ID is [851][422] Integration Identification Number and is part of every message.  I just take it from the first message.
-                _sessionID = Encoding.UTF8.GetString(clientResult.Header);
-
-                _log.LogInformation("Received connection from Integration ID {sessionID}", _sessionID);
-
-                ITv2MessagePacket packet = ParseITv2Message(clientResult.Payload);
-
-                await HandshakeAsync(packet, linkedToken);
-
-            }
-            catch (Exception ex)
-            {
-                _sessionState = sessionState.Closed;
-                _log.LogError(ex, "Error initializing session");
-                return false;
-            }
-            _log.LogInformation("Session {sessionID} initialized successfully", _sessionID);
-            _sessionState = sessionState.Connected;
-            return true;
-        }
-
-        private async Task HandshakeAsync(ITv2MessagePacket messagePacket, CancellationToken cancellation)
-        {
-            OpenSession openSessionMessage = messagePacket.messageData.As<OpenSession>();
-
-            _log.LogInformation("Open Session message for encryption type {encryptionType}", openSessionMessage.EncryptionType);
-
-            await executeInboundTransactionAsync(messagePacket);
-
-            await executeOutboundTransactionAsync(openSessionMessage);
-
-            SetEncryptionHandler(openSessionMessage.EncryptionType);
-
-            messagePacket = await WaitForMessageAsync(cancellation);
-
-            RequestAccess requestAccess = messagePacket.messageData.As<RequestAccess>();
-
-            _log.LogInformation("Request Access message received");
-
-            _encryptionHandler!.ConfigureOutboundEncryption(requestAccess.Initializer);
+            var session = new ITv2Session(transport, settings, logger, mediator);
 
             try
             {
-                await executeInboundTransactionAsync(messagePacket);
+                session._reader = transport.ReadAllAsync(ct).GetAsyncEnumerator(ct);
+                //Minimal message pump that is enough to move opensession and requestaccess to their respective handlers.
+                //we manually enumerate here so we can continue enumerating in the main GetNotificationsAsync loop after
+                //the session is established, without needing to worry about concurrency on the reader or messages getting lost between the two loops.
+                while (await session._reader.MoveNextAsync())
+                {
+                    var result = session.GetCurrentPacket();
 
-                requestAccess = new RequestAccess() { Initializer = _encryptionHandler.ConfigureInboundEncryption() };
+                    var packet = result.Value;
 
-                await executeOutboundTransactionAsync(requestAccess);
-            }
-            catch
-            {
-                _log.LogError("There was a problem negotiating encryption");
-                if (openSessionMessage.EncryptionType == EncryptionType.Type1)
-                {
-                    _log.LogError("The remote communicator is configured for encryption type 1.  This means that the Type 1 Access Code [851][423,450,477,504] is most likely incorrect.");
-                }
-                if (openSessionMessage.EncryptionType == EncryptionType.Type2)
-                {
-                    _log.LogError("The remote communicator is configured for encryption type 2.  This means that the Type 2 Access Code [851][700,701,702,703] is most likely incorrect.");
-                }
-                throw;
-            }
-            
-            return;
-            
-            /*Local methods*****************************************************/
-            async Task executeInboundTransactionAsync(ITv2MessagePacket inboundMessagePacket)
-            {
-                EnsureInboundMessageSequence(ref inboundMessagePacket);
-                var transaction = CreateTransaction(inboundMessagePacket.messageData);
-                await transaction.BeginInboundAsync(inboundMessagePacket, cancellation);
-                await completeTransactionAsync(transaction);
-            }
-            async Task executeOutboundTransactionAsync(IMessageData messageData)
-            {
-                var messagePacket = CreateNextOutboundMessagePacket(messageData);
-                var transaction = CreateTransaction(messageData);
-                await transaction.BeginOutboundAsync(messagePacket, cancellation);
-                await completeTransactionAsync(transaction);
-            }
-            async Task completeTransactionAsync(Transaction transaction)
-            {
-                ITv2MessagePacket messagePacket;
-                while (transaction.CanContinue)
-                {
-                    messagePacket = await WaitForMessageAsync(cancellation);
-                    if (!await transaction.TryContinueAsync(messagePacket, cancellation))
+                    await session.TryHandleCommandPacketAsync(packet, ct);
+                    if (session._state == SessionState.Connected)
                     {
-                        _log.LogDebug($"Unable to continue transaction at message {messagePacket.messageData.GetType()}", serializeMessagePacket(messagePacket));
-                        throw new Exception($"Unable to continue handshake");
+                        return session;
                     }
                 }
-            }
-        }
-
-        /// <summary>
-        /// Listen for incoming messages and process them through transactions.
-        /// </summary>
-        /// <param name="cancellationToken">External cancellation token</param>
-        public async Task ListenAsync(Action<Task<TransactionResult>> continuation, CancellationToken cancellationToken = default)
-        {
-            if (_sessionState != sessionState.Connected)
-                throw new InvalidOperationException("Session is not connected/initialized");
-
-            // Combine external token with internal shutdown token
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdownCts.Token);
-            var linkedToken = linkedCts.Token;
-
-            //The remote communicator will queue messages if there is a disconnection and send them all
-            //once the connection is re-established.  When these messages are being sent, the communicator
-            //doesn't seem to respond/respect sequence numbers of messages it receives.  So, I use this
-            //oneshot timer to allow the queue to empty before I allow messages to be sent out.
-            Timer? flushQueueTimer = new Timer(_ => 
-            {
-                _log.LogInformation("Receive queue is flushed.  Ready to start sending");
-                flushQueueTCS.SetResult();
-                flushQueueTimer = null; //setting this is null combined with the elvis operator gives me quasi-polymorphism so I avoid something like an If check for every message..
-                beginHeartBeat(linkedToken);
-            });
-            _log.LogInformation("ITv2 session started, listening for messages.");
-
-            try
-            {
-                while (!linkedToken.IsCancellationRequested)
-                {
-                    flushQueueTimer?.Change(2000, Timeout.Infinite);    //I figure 2 seconds of no messages means the queue is flushed and we can start sending again.
-                    var messagePacket = await WaitForMessageAsync(linkedToken);
-                    flushQueueTimer?.Change(Timeout.Infinite, Timeout.Infinite);
-
-                    await handleInboundMessagePacket(messagePacket, continuation, linkedToken);
-                }
-            }
-            catch (OperationCanceledException) when (linkedToken.IsCancellationRequested)
-            {
-                _log.LogInformation("ITv2 session listen loop cancelled");
+                return Result<ITv2Session>.Fail(TLinkPacketException.Code.Disconnected, "Transport closed");
             }
             catch (Exception ex)
             {
-                _log.LogError(ex, "Fatal error in ITv2 session listen loop");
-                throw;
+                await session.DisposeAsync();
+                logger.LogError(ex, "Failed to create session");
+                return Result<ITv2Session>.Fail(TLinkPacketException.Code.Unknown, ex.Message);
+            }
+        }
+
+        public async Task<Result<IMessageData>> SendAsync(IMessageData message, CancellationToken ct = default)
+        {
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _shutdownCts.Token);
+            var token = linked.Token;
+
+            await _sendLock.WaitAsync(token);
+            PendingCommand? pendingCommand = null;
+
+            try
+            {
+                var isCommandSequence = message is ICommandMessageData;
+
+                if (isCommandSequence)
+                {
+                    var cmdSeq = ++_commandSequence;
+                    ((ICommandMessageData)message).CorrelationID = cmdSeq;
+                    pendingCommand = new PendingCommand();
+                    _pendingCommands[cmdSeq] = pendingCommand;
+                }
+
+                var packet = new ITv2Packet(
+                    SenderSequence: ++_localSequence,
+                    ReceiverSequence: _remoteSequence,
+                    Message: message);
+
+                var sendResult = await SendPacketAsync(packet, token);
+                if (sendResult.IsFailure)
+                {
+                    if (isCommandSequence && message is ICommandMessageData app)
+                        _pendingCommands.TryRemove(app.CorrelationID, out _);
+                    return Result<IMessageData>.Fail(sendResult.Error!.Value);
+                }
+
+                _logger.LogDebug("Sent {MessageType}", message.GetType().Name);
             }
             finally
             {
-                _sessionState = sessionState.Closed;
-                _log.LogInformation("ITv2 session listen loop exited");
+                _sendLock.Release();
             }
-        }
-        async Task handleInboundMessagePacket(ITv2MessagePacket messagePacket, Action<Task<TransactionResult>> continuation, CancellationToken cancellation)
-        {
-            // Acquire lock with timeout to prevent deadlock
-            if (!await _transactionSemaphore.WaitAsync(TimeSpan.FromSeconds(30), cancellation))
+
+            if (pendingCommand is null)
             {
-                _log.LogError("Transaction semaphore timeout - possible deadlock");
-                throw new TimeoutException("Failed to acquire transaction lock within 30 seconds");
+                return Result<IMessageData>.Ok(new SimpleAck());
             }
+
             try
             {
-                foreach (var waitingTransaction in _pendingTransactions)
+                var response = await pendingCommand.Response.Task.WaitAsync(TimeSpan.FromSeconds(60), ct);
+                _logger.LogDebug("Command sequence response received: {Type}", response.GetType().Name);
+                return Result<IMessageData>.Ok(response);
+            }
+            catch (TimeoutException)
+            {
+                if (message is ICommandMessageData app)
+                    _pendingCommands.TryRemove(app.CorrelationID, out _);
+                return Result<IMessageData>.Fail(TLinkPacketException.Code.Timeout, "No response within 60s");
+            }
+        }
+
+        public async IAsyncEnumerable<IMessageData> GetNotificationsAsync([EnumeratorCancellation] CancellationToken cancellation = default)
+        {
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellation, _shutdownCts.Token);
+            var token = linked.Token;
+
+            _logger.LogInformation("Notification stream started for session {SessionId}", _sessionId);
+
+            while (!token.IsCancellationRequested && _reader is not null && await _reader.MoveNextAsync())
+            {
+                var result = GetCurrentPacket();
+
+                var packet = result.Value;
+
+                if (await TryHandleCommandPacketAsync(packet, token))
                 {
-                    if (await waitingTransaction.TryContinueAsync(messagePacket, cancellation))
-                    {
-                        return;
-                    }
+                    continue;
                 }
-
-                _log.LogMessageDebug("Received", messagePacket.messageData);
-                if (messagePacket.messageData is DefaultMessage defaultMessage)
-                {
-                    _log.LogWarning("Command {command}", defaultMessage.Command);
-                    _log.LogWarning($"Data: {ILoggerExtensions.Enumerable2HexString(defaultMessage.Data)}");
-                }
-
-                EnsureInboundMessageSequence(ref messagePacket);
-
-                var newTransaction = CreateTransaction(messagePacket.messageData);
+                //Else message is a notification.
+                //All notifications get a simpleack response.
+                await SendSimpleAckAsync(packet.SenderSequence, token);
                 
-                _ = newTransaction.Result.ContinueWith(continuation, cancellation);
-
-                _log.LogDebug("New {TransactionType} started: {MessageType}", newTransaction.GetType().Name, messagePacket.messageData.GetType().Name);
-                await newTransaction.BeginInboundAsync(messagePacket, cancellation);
-
-                if (newTransaction.CanContinue)
+                if (packet.Message is MultipleMessagePacket multi)
                 {
-                    _pendingTransactions.Add(newTransaction);
+                    foreach (var subMessage in multi.Messages)
+                    {
+                        if (subMessage is ICommandMessageData command)
+                        {
+                            await HandleCommandMessageAsync(command, token);
+                        }
+                        else
+                        {
+                            yield return subMessage;
+                        }
+                    }
                 }
                 else
                 {
-                    newTransaction.Dispose();
-                    _log.LogDebug("Transaction completed immediately: {MessageType}", messagePacket.messageData.GetType().Name);
-                }
-
-                var staleTransactions = _pendingTransactions.Where(tx => !tx.CanContinue).ToList();
-                foreach (var stale in staleTransactions)
-                {
-                    _log.LogDebug("Removing completed transaction: {Type}", stale.GetType().Name);
-                    _pendingTransactions.Remove(stale);
-                    stale.Dispose();
+                    yield return packet.Message;
                 }
             }
-            finally
-            {
-                _transactionSemaphore.Release();
-            }
+            _logger.LogInformation("Notification stream ended for session {SessionId}", _sessionId);
         }
-
-        void beginHeartBeat(CancellationToken cancellation)
+        private Result<ITv2Packet> GetCurrentPacket()
         {
-            Task.Run(async () =>
+            var tlinkResult = _reader!.Current;
+            if (tlinkResult.IsFailure)
             {
-                try
-                {
-                    //await Task.Delay(10000);
-                    ////await SendMessageAsync(new CommandRequestMessage() { CommandRequest = ITv2Command.Connection_Software_Version });
-                    ////_log.LogDebug("Sent command request: SW Version");
-                    ////await SendMessageAsync(new CommandRequestMessage() { CommandRequest = ITv2Command.ModuleStatus_Global_Status });
-                    ////_log.LogDebug("Sent command request: Module global status ");
-                    //await SendMessageAsync(new CommandRequestMessage() { CommandRequest = ITv2Command.ModuleStatus_Zone_Status, Data =  [0x01, 0x01, 0x01, 0x07 ] });
-                    //_log.LogDebug("Sent command request: Module zone status");
-                    do
-                    {
-                        //I have found that the connection times out at 2 minutes.
-                        await Task.Delay(TimeSpan.FromSeconds(100), cancellation);
-                        await SendMessageAsync(new ConnectionPoll(), cancellation);
-                        _log.LogDebug("Sent Heartbeat");
+                _logger.LogWarning("Bad TLink frame: {Error}", tlinkResult.Error);
+            }
 
-                    } while (!cancellation.IsCancellationRequested);
-                }
-                catch (Exception ex)
-                {
-                    _log.LogError(ex, "Error sending heartbeat");
-                    
-                }
-            }, cancellation);
+            var parseResult = ParseTransportPayload(tlinkResult.Value.Payload);
+            if (parseResult.IsFailure)
+            {
+                _logger.LogWarning("Bad ITv2 packet: {Error}", parseResult.Error);
+            }
 
+            var packet = parseResult.Value;
+            _remoteSequence = packet.SenderSequence;
+            return packet;
         }
         /// <summary>
-        /// Send a message and manage its transaction lifecycle.
+        /// This is intended to handle any situation where we may not automatically send a SimpleAck response to a received message.
         /// </summary>
-        public async Task<TransactionResult> SendMessageAsync(IMessageData messageData, CancellationToken cancellationToken = default)
+        /// <param name="packet"></param>
+        /// <param name="cancellation"></param>
+        /// <returns></returns>
+        private async Task<bool> TryHandleCommandPacketAsync(ITv2Packet packet, CancellationToken cancellation)
         {
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdownCts.Token);
-            var linkedToken = linkedCts.Token;
-            await flushQueueTCS.Task;
-
-            var newTransaction = CreateTransaction(messageData);
-
-            if (!await _transactionSemaphore.WaitAsync(TimeSpan.FromSeconds(30), linkedToken).ConfigureAwait(false))
+            if (packet.Message is SimpleAck)
             {
-                throw new TimeoutException("Failed to acquire transaction lock for send within 30 seconds");
+                //Handler correlated ack
+                return true;
+            }
+            else if (packet.Message is ICommandMessageData command)
+            {
+                await HandleCommandMessageAsync(command, cancellation);
+                return true;
+            }
+            return false;
+        }
+        private async Task HandleCommandMessageAsync(ICommandMessageData command, CancellationToken cancellation)
+        {
+            if (_pendingCommands.TryRemove(command.CorrelationID, out var pending))
+            {
+                await SendSimpleAckAsync(_remoteSequence, cancellation);
+                pending.Response.SetResult(command);
+            }
+            else
+            {
+                //So far the only inbound commands I'm aware of are the handshake commands, opensession and requestaccess.
+                await InboundCommandHandlerAsync(command, cancellation);
+            }
+        }
+        /// <summary>
+        /// This routes the command message to an appropiate handler for execution.  
+        /// </summary>
+        /// <param name="command"></param>
+        /// <param name="cancellation"></param>
+        /// <returns></returns>
+        /// <exception cref="InvalidOperationException"></exception>
+        private async Task InboundCommandHandlerAsync(ICommandMessageData command, CancellationToken cancellation)
+        {
+            bool asyncCommand = command is CommandMessageData cmdData && cmdData.IsAsynchronous;
+
+            if (asyncCommand)
+            {
+                await SendSimpleAckAsync(_remoteSequence, cancellation);
             }
 
             try
             {
-                var message = CreateNextOutboundMessagePacket(messageData);
+                var requestType = typeof(SessionRequest<>).MakeGenericType(command.GetType());
+                var request = Activator.CreateInstance(requestType);
 
-                _log.LogMessageDebug("Sending", messageData);
-                await newTransaction.BeginOutboundAsync(message, linkedToken).ConfigureAwait(false);
-                
-                if (newTransaction.CanContinue)
+                var sessionProp = requestType.GetProperty("Session");
+                var messageDataProp = requestType.GetProperty("MessageData");
+
+                sessionProp?.SetValue(request, this);
+                messageDataProp?.SetValue(request, command);
+
+                var handlerResponse = await _mediator.Send(request!, cancellation);
+
+                var handlerResult = handlerResponse switch
                 {
-                    _pendingTransactions.Add(newTransaction);
-                    _log.LogDebug("Outbound transaction started: {MessageType}", messageData.GetType().Name);
-                }
+                    Result<SessionRequestResult> r => r,
+                    _ => throw new InvalidOperationException()
+                };
+
+                IMessageData responseMessage = handlerResult.IsSuccess ? new CommandResponse { CorrelationID = command.CorrelationID, ResponseCode = CommandResponseCode.Success }
+                                                                       : new CommandError { Command = MessageFactory.GetCommand(command), NackCode = ITv2NackCode.UnknownError };
+                
+                await SendAsync(responseMessage, cancellation);
+
+                if (handlerResult.IsFailure)
+                    return;
+
+                if (handlerResult.Value.Continuation is null)
+                    return;
+
+                await handlerResult.Value.Continuation(cancellation);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error handling inbound command {Type}", command.GetType().Name);
+            }
+        }
+        private async Task SendSimpleAckAsync(byte senderSequence, CancellationToken ct)
+        {
+            await _sendLock.WaitAsync(ct);
+            try
+            {
+                var ackPacket = new ITv2Packet(
+                    SenderSequence: ++_localSequence,
+                    ReceiverSequence: senderSequence,
+                    Message: new SimpleAck());
+
+                await SendPacketAsync(ackPacket, ct);
             }
             finally
             {
-                _transactionSemaphore.Release();
+                _sendLock.Release();
             }
-            //return await must happen outside of semaphore lock to prevent deadlocks.
-            return await newTransaction.Result;
         }
 
-        /// <summary>
-        /// Immediately shutdown the session, cancelling all pending operations.
-        /// </summary>
-        public async Task ShutdownAsync()
+        private async Task<Result> SendPacketAsync(ITv2Packet packet, CancellationToken ct)
         {
-            if (_shutdownCts.IsCancellationRequested)
+            var bytes = SerializePacket(packet);
+            ITv2Framing.AddFraming(bytes);
+
+            var encrypted = _encryptionHandler?.HandleOutboundData(bytes.ToArray()) ?? bytes.ToArray();
+
+            var result = await _transport.SendAsync(encrypted, ct);
+            if (result.IsFailure)
+                return Result.Fail(TLinkPacketException.Code.Disconnected, result.Error!.Value.Message);
+
+            return Result.Ok();
+        }
+
+        private Result<ITv2Packet> ParseTransportPayload(ReadOnlyMemory<byte> rawPayload)
+        {
+            try
             {
-                _log.LogWarning("Shutdown already initiated");
-                return;
+                var payload = _encryptionHandler?.HandleInboundData(rawPayload.ToArray()) ?? rawPayload.ToArray();
+                var span = new ReadOnlySpan<byte>(payload);
+
+                var framingResult = ITv2Framing.RemoveFraming(ref span);
+                if (framingResult.IsFailure)
+                    return Result<ITv2Packet>.Fail(framingResult.Error!.Value);
+
+                byte senderSeq = span.PopByte();
+                byte receiverSeq = span.PopByte();
+                var message = MessageFactory.DeserializeMessage(span);
+
+                return Result<ITv2Packet>.Ok(new ITv2Packet(senderSeq, receiverSeq, message));
             }
+            catch (Exception ex)
+            {
+                return Result<ITv2Packet>.Fail(TLinkPacketException.Code.Unknown, ex.Message);
+            }
+        }
 
-            _log.LogInformation("Initiating ITv2 session shutdown");
+        private static List<byte> SerializePacket(ITv2Packet packet)
+        {
+            var bytes = new List<byte>
+            {
+                packet.SenderSequence,
+                packet.ReceiverSequence
+            };
+            bytes.AddRange(MessageFactory.SerializeMessage(packet.Message));
+            return bytes;
+        }
 
-            // Cancel all operations
+        public async ValueTask DisposeAsync()
+        {
             _shutdownCts.Cancel();
 
-            // Wait for transaction lock and abort all transactions
-            if (await _transactionSemaphore.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false))
-            {
-                try
-                {
-                    var transactionCount = _pendingTransactions.Count;
-                    foreach (var transaction in _pendingTransactions.ToArray())
-                    {
-                        try
-                        {
-                            transaction.Abort();
-                        }
-                        catch (Exception ex)
-                        {
-                            _log.LogWarning(ex, "Error aborting transaction during shutdown");
-                        }
-                    }
-                    _pendingTransactions.Clear();
-                    _log.LogInformation("Aborted {Count} pending transactions", transactionCount);
-                }
-                finally
-                {
-                    _transactionSemaphore.Release();
-                }
-            }
-            else
-            {
-                _log.LogWarning("Could not acquire transaction lock during shutdown");
-            }
+            foreach (var (_, pending) in _pendingCommands)
+                pending.Response.TrySetCanceled();
+            _pendingCommands.Clear();
 
-            _log.LogInformation("ITv2 session shutdown complete");
-        }
+            if (_reader is not null)
+                await _reader.DisposeAsync();
 
-        async Task<ITv2MessagePacket> WaitForMessageAsync(CancellationToken cancellationToken)
-        {
-            var clientResult = await WaitForClientResultAsync(cancellationToken);
-            ITv2MessagePacket messagePacket = ParseITv2Message(clientResult.Payload);
-            _remoteSequence = messagePacket.senderSequence; //_remoteSequence shoud always track the latest sender sequence.
-            return messagePacket;
-        }
-
-        async Task<TLinkClient.TLinkReadResult> WaitForClientResultAsync(CancellationToken cancellationToken)
-        {
-            var clientResult = await _tlinkClient.ReadMessageAsync(cancellationToken);
-
-            if (clientResult.IsComplete)
-            {
-                _log.LogWarning("Client connection completed/closed");
-                throw new TLinkPacketException(TLinkPacketException.Code.Disconnected);
-            }
-
-            return clientResult;
-        }
-
-        ITv2MessagePacket ParseITv2Message(byte[] payload)
-        {
-            // ITv2 Frame Structure:
-            // [Length:1-2][Sender:1][Receiver:1][Command?:2][Payload:0-N][CRC:2]
-            var decryptedPayload = _encryptionHandler?.HandleInboundData(payload) ?? payload;
-
-            var messageBytes = new ReadOnlySpan<byte>(decryptedPayload);
-            ITv2Framing.RemoveFraming(ref messageBytes); // Removes length prefix and validates CRC
-
-            if (_log.IsEnabled(LogLevel.Trace))
-            {
-                _log.LogTrace("Received message (post decryption) {messageBytes}", messageBytes.ToArray());
-            }
-
-
-            // Sequence bytes track message ordering (wrap at 255)
-            byte senderSeq = messageBytes.PopByte();      // Remote's incrementing counter
-            byte receiverSeq = messageBytes.PopByte();    // Expected local sequence
-            IMessageData messageData = MessageFactory.DeserializeMessage(messageBytes);
-
-            return new ITv2MessagePacket(
-                senderSequence:   senderSeq,
-                receiverSequence: receiverSeq,
-                messageData:      messageData);
-        }
-        Transaction CreateTransaction(IMessageData messageData) => TransactionFactory.CreateTransaction(messageData, _log, SendTransactionMessageAsync);
-        async Task SendTransactionMessageAsync(ITv2MessagePacket message, CancellationToken cancellationToken)
-        {
-            var messageBytes = serializeMessagePacket(message);
-            _log.LogTrace("Sending message (pre encryption) {messageBytes}", messageBytes);
-            ITv2Framing.AddFraming(messageBytes);
-            var encryptedBytes = _encryptionHandler?.HandleOutboundData(messageBytes.ToArray()) ?? messageBytes.ToArray();
-            await _tlinkClient.SendMessageAsync(encryptedBytes, cancellationToken);
-        }
-        List<byte> serializeMessagePacket(ITv2MessagePacket messagePacket)
-        {
-            var messageBytes = new List<byte>(
-                [messagePacket.senderSequence,
-                 messagePacket.receiverSequence,
-                 ..MessageFactory.SerializeMessage(messagePacket.messageData)
-                ]);
-            return messageBytes;
-        }
-        void EnsureInboundMessageSequence(ref ITv2MessagePacket inboundMessagePacket)
-        {
-            //This gets called every time a new inbound transaction is about to be created.
-            //This is when we update/sync the app sequence.
-            if (inboundMessagePacket.messageData is IAppSequenceMessage appSequenceMessage)
-            {
-                _appSequence = appSequenceMessage.AppSequence;
-            }
-
-            if (inboundMessagePacket.receiverSequence != _localSequence)
-            {
-                inboundMessagePacket = inboundMessagePacket with { receiverSequence = (byte)_localSequence };
-            }
-        }
-        ITv2MessagePacket CreateNextOutboundMessagePacket(IMessageData messageData)
-        {
-            if (messageData is IAppSequenceMessage appSequenceMessage)
-            {
-                appSequenceMessage.AppSequence = GetNextAppSequence();
-            }
-            return new ITv2MessagePacket(
-                senderSequence: GetNextLocalSequence(),
-                receiverSequence: _remoteSequence,
-                messageData: messageData);
-        }
-        byte GetNextLocalSequence() => ++_localSequence;
-        byte GetNextAppSequence() => ++_appSequence;
-        void SetEncryptionHandler(EncryptionType encryptionType)
-        {
-            if (_encryptionHandler is not null)
-                throw new InvalidOperationException("Encryption handler has already been set.");
-
-            _encryptionHandler = encryptionType switch
-            {
-                EncryptionType.Type1 => new Type1EncryptionHandler(_itv2Settings),
-                EncryptionType.Type2 => new Type2EncryptionHandler(_itv2Settings),
-                _ => throw new NotSupportedException($"Unsupported encryption type: {encryptionType}")
-            };
-
-            _log.LogInformation("Encryption handler set to {Type}", encryptionType);
-        }
-        public void Dispose()
-        {
-            _transactionSemaphore.Dispose();
-            _shutdownCts.Dispose();
             _encryptionHandler?.Dispose();
+            _sendLock.Dispose();
+            _shutdownCts.Dispose();
         }
-        enum sessionState
+
+        private enum SessionState
         {
-            Uninitialized,
+            WaitingForOpenSession,
+            WaitingForRequestAccess,
             Connected,
             Closed
+        }
+
+        private class PendingCommand
+        {
+            public TaskCompletionSource<IMessageData> Response { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         }
     }
 }

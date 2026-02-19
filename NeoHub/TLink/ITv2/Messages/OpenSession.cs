@@ -17,15 +17,15 @@
 using DSC.TLink.ITv2.Enumerations;
 using DSC.TLink.ITv2.Transactions;
 using DSC.TLink.Serialization;
+using MediatR;
 
 
 namespace DSC.TLink.ITv2.Messages
 {
     [ITv2Command(ITv2Command.Connection_Open_Session)]
     [CommandResponseTransaction]
-    public record OpenSession : IAppSequenceMessage
+    public record OpenSession : CommandMessageData
     {
-        public byte AppSequence { get; set; }
         public Itv2PanelDeviceType DeviceType { get; init; }
         
         [FixedArray(2)]
@@ -53,5 +53,6 @@ namespace DSC.TLink.ITv2.Messages
         public int FirmwareRevisionNumber => FirmwareVersion.Length >= 2 
             ? (FirmwareVersion[1] & 0x0F) 
             : 0;
+        public override bool IsAsynchronous => false;
     }
 }

@@ -1,3 +1,5 @@
+using DSC.TLink.Serialization;
+
 namespace DSC.TLink.ITv2.Messages
 {
     /// <summary>
@@ -7,8 +9,13 @@ namespace DSC.TLink.ITv2.Messages
     /// 
     /// Upstream middleware uses it to correlate outbound commands with their deferred inbound responses.
     /// </summary>
-    internal interface IAppSequenceMessage : IMessageData
+    internal interface ICommandMessageData : IMessageData
     {
-        byte AppSequence { get; set; }
+        byte CorrelationID { get; }
+    }
+    public abstract record class CommandMessageData : ICommandMessageData
+    {
+        byte ICommandMessageData.CorrelationID { get; }
+        public virtual bool IsAsynchronous => true;
     }
 }
