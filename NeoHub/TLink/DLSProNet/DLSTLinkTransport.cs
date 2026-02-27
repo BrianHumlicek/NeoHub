@@ -1,17 +1,37 @@
-using System.Buffers;
-using System.Security.Cryptography;
+// DSC TLink - a communications library for DSC Powerseries NEO alarm panels
+// Copyright (C) 2024 Brian Humlicek
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 using DSC.TLink.Extensions;
+using Microsoft.Extensions.Logging;
+using System.Buffers;
+using System.IO.Pipelines;
+using System.Security.Cryptography;
 
 namespace DSC.TLink.DLSProNet;
 
 /// <summary>
-/// DLS-specific packet handling: length-prefixed framing + optional AES-ECB encryption.
-/// Replaces <c>DLSTLinkClient</c> inheritance with composition.
+/// DLS-specific TLink transport: length-prefixed framing + optional AES-ECB encryption.
 /// </summary>
-internal sealed class DlsPacketAdapter : IPacketAdapter, IDisposable
+internal sealed class DLSTLinkTransport : TLinkTransport, IDisposable
 {
     private readonly Aes _aes = Aes.Create();
     private bool _encryptionActive;
+
+    public DLSTLinkTransport(IDuplexPipe pipe, ILogger<DLSTLinkTransport> logger)
+        : base(pipe, logger) { }
 
     public void ActivateEncryption(byte[] key)
     {
@@ -23,24 +43,21 @@ internal sealed class DlsPacketAdapter : IPacketAdapter, IDisposable
 
     /// <summary>
     /// DLS packets are wrapped in a 2-byte big-endian length prefix.
-    /// Strips the prefix, then scans for the 0x7F TLink delimiter within.
+    /// Strips the prefix, then scans for the 0x7F TLink delimiter within (or uses
+    /// the full length-bounded slice when encrypted, since the delimiter isn't visible).
     /// </summary>
-    public bool TryExtractPacket(ref ReadOnlySequence<byte> buffer, out ReadOnlySequence<byte> packet)
+    protected override bool TryExtractPacket(ref ReadOnlySequence<byte> buffer, out ReadOnlySequence<byte> packet)
     {
         var reader = new SequenceReader<byte>(buffer);
 
-        // Need at least 2 bytes for the length prefix
         if (!reader.TryReadBigEndian(out short encodedLength) || buffer.Length < encodedLength + 2)
         {
             packet = default;
             return false;
         }
 
-        // Slice past the 2-byte length prefix to get the inner packet
         var innerBuffer = buffer.Slice(2, encodedLength);
 
-        // When encryption is active, the inner bytes are ciphertext — 
-        // the 0x7F delimiter won't be visible. Use the length as the boundary.
         if (_encryptionActive)
         {
             packet = innerBuffer;
@@ -48,7 +65,6 @@ internal sealed class DlsPacketAdapter : IPacketAdapter, IDisposable
             return true;
         }
 
-        // When unencrypted, scan for the 0x7F delimiter within the length-bounded slice
         var delimiter = innerBuffer.PositionOf((byte)0x7F);
         if (!delimiter.HasValue)
         {
@@ -62,11 +78,7 @@ internal sealed class DlsPacketAdapter : IPacketAdapter, IDisposable
         return true;
     }
 
-    /// <summary>
-    /// Decrypts inbound packet bytes when encryption is active.
-    /// The decrypted bytes contain the standard TLink frame (header|0x7E|payload|0x7F).
-    /// </summary>
-    public Result<ReadOnlySequence<byte>> TransformInbound(ReadOnlySequence<byte> rawPacket)
+    protected override Result<ReadOnlySequence<byte>> TransformInbound(ReadOnlySequence<byte> rawPacket)
     {
         if (!_encryptionActive)
             return rawPacket;
@@ -89,17 +101,12 @@ internal sealed class DlsPacketAdapter : IPacketAdapter, IDisposable
         }
     }
 
-    /// <summary>
-    /// Encrypts outbound packet bytes and prepends the 2-byte length prefix.
-    /// </summary>
-    public Result<byte[]> TransformOutbound(byte[] framedPacket)
+    protected override Result<byte[]> TransformOutbound(byte[] framedPacket)
     {
         try
         {
             if (_encryptionActive)
-            {
                 framedPacket = _aes.EncryptEcb(framedPacket, PaddingMode.Zeros);
-            }
 
             ushort length = (ushort)framedPacket.Length;
             byte[] result = new byte[2 + framedPacket.Length];
@@ -117,4 +124,10 @@ internal sealed class DlsPacketAdapter : IPacketAdapter, IDisposable
     }
 
     public void Dispose() => _aes.Dispose();
+
+    public override async ValueTask DisposeAsync()
+    {
+        _aes.Dispose();
+        await base.DisposeAsync();
+    }
 }

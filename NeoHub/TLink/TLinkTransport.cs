@@ -8,30 +8,33 @@ namespace DSC.TLink;
 
 /// <summary>
 /// Concrete TLink framing implementation over an <see cref="IDuplexPipe"/>.
-/// Delegates packet extraction and transforms to <see cref="IPacketAdapter"/>,
-/// keeping the core byte-stuffing logic universal.
+/// Handles byte-stuffing, 0x7E/0x7F delimiters, and frame parsing.
+/// 
+/// Subclasses (e.g. DLS) can override packet extraction and transforms
+/// for transport-specific framing (length prefixes, encryption, etc.).
 /// </summary>
-internal sealed class TLinkTransport : ITLinkTransport
+internal class TLinkTransport : ITLinkTransport
 {
     private readonly IDuplexPipe _pipe;
-    private readonly IPacketAdapter _adapter;
-    private readonly ILogger<TLinkTransport> _logger;
+    private readonly ILogger _logger;
     private ReadOnlyMemory<byte> _defaultHeader;
     private bool _headerCaptured;
 
     public TLinkTransport(IDuplexPipe pipe, ILogger<TLinkTransport> logger)
-        : this(pipe, DefaultPacketAdapter.Instance, logger) { }
-
-    public TLinkTransport(IDuplexPipe pipe, IPacketAdapter adapter, ILogger<TLinkTransport> logger)
     {
         _pipe = pipe ?? throw new ArgumentNullException(nameof(pipe));
-        _adapter = adapter ?? throw new ArgumentNullException(nameof(adapter));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    protected TLinkTransport(IDuplexPipe pipe, ILogger logger)
+    {
+        _pipe = pipe ?? throw new ArgumentNullException(nameof(pipe));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     public ReadOnlyMemory<byte> DefaultHeader => _defaultHeader;
 
-    #region Inbound — IAsyncEnumerable<Result<TLinkMessage>>
+    #region Inbound
 
     public async IAsyncEnumerable<Result<TLinkMessage>> ReadAllAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -66,9 +69,9 @@ internal sealed class TLinkTransport : ITLinkTransport
 
             try
             {
-                if (_adapter.TryExtractPacket(ref buffer, out var rawPacket))
+                if (TryExtractPacket(ref buffer, out var rawPacket))
                 {
-                    var transformResult = _adapter.TransformInbound(rawPacket);
+                    var transformResult = TransformInbound(rawPacket);
                     if (transformResult.IsFailure)
                     {
                         _logger.LogWarning("Inbound transform failed: {Error}", transformResult.Error);
@@ -95,10 +98,40 @@ internal sealed class TLinkTransport : ITLinkTransport
                 _logger.LogInformation("Transport completed (remote closed)");
                 return Result<TLinkMessage>.Fail(TLinkPacketException.Code.Disconnected, "Transport completed");
             }
-
-            // Not enough data yet — loop back to ReadAsync for more bytes
         }
     }
+
+    /// <summary>
+    /// Attempt to extract a complete packet from the buffer.
+    /// Default: scans for the 0x7F TLink delimiter.
+    /// </summary>
+    protected virtual bool TryExtractPacket(ref ReadOnlySequence<byte> buffer, out ReadOnlySequence<byte> packet)
+    {
+        var position = buffer.PositionOf((byte)0x7F);
+        if (!position.HasValue)
+        {
+            packet = default;
+            return false;
+        }
+
+        var endInclusive = buffer.GetPosition(1, position.Value);
+        packet = buffer.Slice(buffer.Start, endInclusive);
+        buffer = buffer.Slice(endInclusive);
+        return true;
+    }
+
+    /// <summary>
+    /// Transform raw inbound packet bytes before frame parsing.
+    /// Default: no-op (pass-through).
+    /// </summary>
+    protected virtual Result<ReadOnlySequence<byte>> TransformInbound(ReadOnlySequence<byte> rawPacket) => rawPacket;
+
+    /// <summary>
+    /// Transform framed outbound packet bytes before writing to the pipe.
+    /// Default: no-op (pass-through).
+    /// </summary>
+    protected virtual Result<byte[]> TransformOutbound(byte[] framedPacket) => framedPacket;
+
     private static Result<TLinkMessage> ParseFrame(ReadOnlySequence<byte> packetSequence)
     {
         var reader = new SequenceReader<byte>(packetSequence);
@@ -125,7 +158,7 @@ internal sealed class TLinkTransport : ITLinkTransport
 
     #endregion
 
-    #region Outbound — Send
+    #region Outbound
 
     public Task<Result> SendAsync(ReadOnlyMemory<byte> payload, CancellationToken cancellationToken = default)
         => SendAsync(_defaultHeader, payload, cancellationToken);
@@ -135,7 +168,6 @@ internal sealed class TLinkTransport : ITLinkTransport
         ReadOnlyMemory<byte> payload,
         CancellationToken cancellationToken = default)
     {
-        // Step 1: Build the standard TLink frame (stuffing + delimiters)
         var stuffedHeader = Stuff(header.Span);
         var stuffedPayload = Stuff(payload.Span);
 
@@ -147,12 +179,10 @@ internal sealed class TLinkTransport : ITLinkTransport
         stuffedPayload.CopyTo(framedPacket.AsMemory(stuffedHeader.Length + 1));
         framedPacket[^1] = 0x7F;
 
-        // Step 2: Let adapter transform (e.g. DLS encryption + length prefix)
-        var transformResult = _adapter.TransformOutbound(framedPacket);
+        var transformResult = TransformOutbound(framedPacket);
         if (transformResult.IsFailure)
             return Result.Fail(transformResult.Error!.Value);
 
-        // Step 3: Write to pipe
         try
         {
             _logger.LogTrace("Sent {Packet}", transformResult.Value);
@@ -171,7 +201,7 @@ internal sealed class TLinkTransport : ITLinkTransport
 
     #endregion
 
-    #region Byte Stuffing (shared core — same for ITv2 and DLS)
+    #region Byte Stuffing
 
     private static byte[] Stuff(ReadOnlySpan<byte> input)
     {
@@ -214,7 +244,7 @@ internal sealed class TLinkTransport : ITLinkTransport
                     0x00 => 0x7D,
                     0x01 => 0x7E,
                     0x02 => 0x7F,
-                    _ => 0xFF // sentinel — handled below
+                    _ => 0xFF
                 };
 
                 if (escaped > 0x02)
@@ -235,7 +265,7 @@ internal sealed class TLinkTransport : ITLinkTransport
 
     #endregion
 
-    public ValueTask DisposeAsync()
+    public virtual ValueTask DisposeAsync()
     {
         _pipe.Input.Complete();
         _pipe.Output.Complete();
