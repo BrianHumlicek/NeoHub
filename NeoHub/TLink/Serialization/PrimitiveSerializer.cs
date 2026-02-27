@@ -6,37 +6,17 @@
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
-using System.Reflection;
-
 namespace DSC.TLink.Serialization
 {
     /// <summary>
     /// Handles primitive types (byte, short, int, etc.) and enums.
-    /// Also provides static helper methods for other serializers to use.
+    /// Provides static helper methods used by BinarySerializer and other serializers.
     /// </summary>
-    internal class PrimitiveSerializer : ITypeSerializer
+    internal static class PrimitiveSerializer
     {
-        public bool CanHandle(PropertyInfo property)
+        internal static void WritePrimitive(List<byte> bytes, TypeCode typeCode, object? value)
         {
-            var type = property.PropertyType;
-            return Type.GetTypeCode(type) != TypeCode.Object || type.IsEnum;
-        }
-
-        public void Write(List<byte> bytes, PropertyInfo property, object? value)
-        {
-            WritePrimitive(bytes, property, value);
-        }
-
-        public object Read(ReadOnlySpan<byte> bytes, ref int offset, PropertyInfo property, int remainingBytes)
-        {
-            return ReadPrimitive(bytes, ref offset, property);
-        }
-
-        internal static void WritePrimitive(List<byte> bytes, PropertyInfo property, object? value)
-        {
-            var type = property.PropertyType;
-
-            switch (Type.GetTypeCode(type))
+            switch (typeCode)
             {
                 case TypeCode.Byte:
                     bytes.Add((byte)(value ?? 0));
@@ -62,21 +42,15 @@ namespace DSC.TLink.Serialization
                     WriteInt32(bytes, (int)(value ?? 0));
                     break;
 
-                case TypeCode.Object when type.IsEnum:
-                    WriteEnum(bytes, type, value);
-                    break;
-
                 default:
                     throw new NotSupportedException(
-                        $"Type {type} not supported for binary serialization (property '{property.Name}')");
+                        $"TypeCode {typeCode} not supported for binary serialization");
             }
         }
 
-        internal static object ReadPrimitive(ReadOnlySpan<byte> bytes, ref int offset, PropertyInfo property)
+        internal static object ReadPrimitive(ReadOnlySpan<byte> bytes, ref int offset, TypeCode typeCode)
         {
-            var type = property.PropertyType;
-
-            return Type.GetTypeCode(type) switch
+            return typeCode switch
             {
                 TypeCode.Byte => bytes[offset++],
                 TypeCode.SByte => (sbyte)bytes[offset++],
@@ -84,8 +58,7 @@ namespace DSC.TLink.Serialization
                 TypeCode.Int16 => ReadInt16(bytes, ref offset),
                 TypeCode.UInt32 => ReadUInt32(bytes, ref offset),
                 TypeCode.Int32 => ReadInt32(bytes, ref offset),
-                TypeCode.Object when type.IsEnum => ReadEnum(bytes, ref offset, type),
-                _ => throw new NotSupportedException($"Type {type} not supported (property '{property.Name}')")
+                _ => throw new NotSupportedException($"TypeCode {typeCode} not supported")
             };
         }
 
@@ -120,11 +93,9 @@ namespace DSC.TLink.Serialization
             bytes.Add((byte)(value & 0xFF));
         }
 
-        internal static void WriteEnum(List<byte> bytes, Type type, object? value)
+        internal static void WriteEnum(List<byte> bytes, TypeCode underlyingTypeCode, object? value)
         {
-            var underlyingType = Enum.GetUnderlyingType(type);
-
-            switch (Type.GetTypeCode(underlyingType))
+            switch (underlyingTypeCode)
             {
                 case TypeCode.Byte:
                     bytes.Add((byte)(value ?? 0));
@@ -135,7 +106,7 @@ namespace DSC.TLink.Serialization
                     break;
 
                 default:
-                    throw new NotSupportedException($"Enum underlying type {underlyingType} not supported");
+                    throw new NotSupportedException($"Enum underlying TypeCode {underlyingTypeCode} not supported");
             }
         }
 
@@ -173,15 +144,13 @@ namespace DSC.TLink.Serialization
             return val;
         }
 
-        internal static object ReadEnum(ReadOnlySpan<byte> bytes, ref int offset, Type type)
+        internal static object ReadEnum(ReadOnlySpan<byte> bytes, ref int offset, Type enumType, TypeCode underlyingTypeCode)
         {
-            var underlyingType = Enum.GetUnderlyingType(type);
-
-            return Type.GetTypeCode(underlyingType) switch
+            return underlyingTypeCode switch
             {
-                TypeCode.Byte => Enum.ToObject(type, bytes[offset++]),
-                TypeCode.UInt16 => Enum.ToObject(type, ReadUInt16(bytes, ref offset)),
-                _ => throw new NotSupportedException($"Enum underlying type {underlyingType} not supported")
+                TypeCode.Byte => Enum.ToObject(enumType, bytes[offset++]),
+                TypeCode.UInt16 => Enum.ToObject(enumType, ReadUInt16(bytes, ref offset)),
+                _ => throw new NotSupportedException($"Enum underlying TypeCode {underlyingTypeCode} not supported")
             };
         }
 

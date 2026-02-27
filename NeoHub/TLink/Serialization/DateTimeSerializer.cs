@@ -6,16 +6,10 @@
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
-using System.Reflection;
-
 namespace DSC.TLink.Serialization
 {
     /// <summary>
     /// Handles serialization of DateTime values.
-    /// Use attributes to specify the serialization format:
-    /// - [DateFormat]: Date only (TODO)
-    /// - [TimeFormat]: Time only (TODO)
-    /// - [DateTimeFormat]: Full date and time (4 bytes, packed u32)
     /// 
     /// DateTime Format (32-bit packed):
     /// - Bits 31-27 (5 bits): Hour (0-23)
@@ -25,20 +19,13 @@ namespace DSC.TLink.Serialization
     /// - Bits 8-5   (4 bits): Month (1-12)
     /// - Bits 4-0   (5 bits): Day (1-31)
     /// </summary>
-    internal class DateTimeSerializer : ITypeSerializer
+    internal static class DateTimeSerializer
     {
-        public bool CanHandle(PropertyInfo property)
+        internal static void Write(List<byte> bytes, DateTimeFormatType format, object? value, bool isNullable)
         {
-            return property.PropertyType == typeof(DateTime) || property.PropertyType == typeof(DateTime?);
-        }
-
-        public void Write(List<byte> bytes, PropertyInfo property, object? value)
-        {
-            var format = GetDateTimeFormat(property);
-            var dateTime = (DateTime?)value;
-            if (!dateTime.HasValue && property.PropertyType == typeof(DateTime?))
+            var dateTime = value as DateTime?;
+            if (!dateTime.HasValue && isNullable)
             {
-                // Nullable with no value - write zeros based on format
                 WriteNullValue(bytes, format);
                 return;
             }
@@ -50,41 +37,24 @@ namespace DSC.TLink.Serialization
                 case DateTimeFormatType.Date:
                     WriteDate(bytes, dt);
                     break;
-
                 case DateTimeFormatType.Time:
                     WriteTime(bytes, dt);
                     break;
-
                 case DateTimeFormatType.DateTime:
                     WriteDateTime(bytes, dt);
                     break;
             }
         }
 
-        public object Read(ReadOnlySpan<byte> bytes, ref int offset, PropertyInfo property, int remainingBytes)
+        internal static object Read(ReadOnlySpan<byte> bytes, ref int offset, DateTimeFormatType format)
         {
-            var format = GetDateTimeFormat(property);
-
             return format switch
             {
                 DateTimeFormatType.Date => ReadDate(bytes, ref offset),
                 DateTimeFormatType.Time => ReadTime(bytes, ref offset),
                 DateTimeFormatType.DateTime => ReadDateTime(bytes, ref offset),
-                _ => throw new NotSupportedException($"Unknown DateTime format for property '{property.Name}'")
+                _ => throw new NotSupportedException($"Unknown DateTime format: {format}")
             };
-        }
-
-        private static DateTimeFormatType GetDateTimeFormat(PropertyInfo property)
-        {
-            if (property.IsDefined(typeof(DateFormatAttribute), false))
-                return DateTimeFormatType.Date;
-            if (property.IsDefined(typeof(TimeFormatAttribute), false))
-                return DateTimeFormatType.Time;
-            if (property.IsDefined(typeof(DateTimeFormatAttribute), false))
-                return DateTimeFormatType.DateTime;
-
-            // Default to DateTime if no attribute specified
-            return DateTimeFormatType.DateTime;
         }
 
         private static void WriteDate(List<byte> bytes, DateTime dt)
@@ -125,8 +95,8 @@ namespace DSC.TLink.Serialization
         {
             int byteCount = format switch
             {
-                DateTimeFormatType.Date => 4,      // TODO: Adjust when implemented
-                DateTimeFormatType.Time => 4,      // TODO: Adjust when implemented
+                DateTimeFormatType.Date => 4,
+                DateTimeFormatType.Time => 4,
                 DateTimeFormatType.DateTime => 4,
                 _ => 0
             };
@@ -172,13 +142,7 @@ namespace DSC.TLink.Serialization
             }
         }
 
-        private enum DateTimeFormatType
-        {
-            Date,
-            Time,
-            DateTime
         }
-    }
 
     /// <summary>
     /// Specifies that a DateTime property should be serialized as date only.
