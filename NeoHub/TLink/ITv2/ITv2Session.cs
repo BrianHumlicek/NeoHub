@@ -107,7 +107,6 @@ internal sealed class ITv2Session : IITv2Session
         if (handshakeResult.IsFailure)
             return Result<ITv2Session>.Fail(handshakeResult.Error!.Value);
 
-        session.SessionId = System.Text.Encoding.UTF8.GetString(transport.DefaultHeader.Span);
         session._logger.LogInformation("Session {SessionId} connected successfully", session.SessionId);
 
         _ = session.ReceivePumpAsync();
@@ -156,6 +155,9 @@ internal sealed class ITv2Session : IITv2Session
         // Steps 1-3: Panel → Us: OpenSession command transaction
         // 1. Receive OpenSession
         var initialPacket = await ReceivePacketAsync(ct);
+
+        SessionId = System.Text.Encoding.UTF8.GetString(_transport.DefaultHeader.Span);
+        _logger.LogInformation("Connection from Integration Identification Number [851][422]: {SessionId}", SessionId);
         OpenSession openSession = initialPacket.Message.As<OpenSession>();
         _commandSequence = openSession.CommandSequence;
 
