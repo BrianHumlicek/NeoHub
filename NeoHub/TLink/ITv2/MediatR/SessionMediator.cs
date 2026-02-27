@@ -1,5 +1,4 @@
-﻿using DSC.TLink.ITv2.Enumerations;
-using DSC.TLink.ITv2.Messages;
+﻿using DSC.TLink.ITv2.Messages;
 using MediatR;
 using Microsoft.Extensions.Logging;
 
@@ -39,6 +38,7 @@ namespace DSC.TLink.ITv2.MediatR
                 return new SessionResponse
                 {
                     Success = false,
+                    ErrorCode = TLinkErrorCode.SessionNotFound,
                     ErrorMessage = $"Session {request.SessionID} not found"
                 };
             }
@@ -52,19 +52,15 @@ namespace DSC.TLink.ITv2.MediatR
                     return new SessionResponse
                     {
                         Success = false,
-                        ErrorMessage = result.Error?.ToString()
+                        ErrorCode = result.Error!.Value.Code,
+                        ErrorMessage = result.Error.Value.Message
                     };
                 }
 
                 return new SessionResponse
                 {
                     Success = true,
-                    MessageData = result.Value,
-                    ErrorDetail = result.Value switch
-                    {
-                        CommandResponse cmdResp => $"Command Response Code: {cmdResp.ResponseCode.Description()}",
-                        _ => null
-                    }
+                    MessageData = result.Value
                 };
             }
             catch (Exception ex)

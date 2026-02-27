@@ -62,7 +62,7 @@ internal class TLinkTransport : ITLinkTransport
             }
             catch (OperationCanceledException)
             {
-                return Result<TLinkMessage>.Fail(TLinkPacketException.Code.Cancelled, "Read was cancelled");
+                return Result<TLinkMessage>.Fail(TLinkErrorCode.Cancelled, "Read was cancelled");
             }
 
             var buffer = readResult.Buffer;
@@ -96,7 +96,7 @@ internal class TLinkTransport : ITLinkTransport
             if (readResult.IsCompleted)
             {
                 _logger.LogInformation("Transport completed (remote closed)");
-                return Result<TLinkMessage>.Fail(TLinkPacketException.Code.Disconnected, "Transport completed");
+                return Result<TLinkMessage>.Fail(TLinkErrorCode.Disconnected, "Transport completed");
             }
         }
     }
@@ -138,10 +138,10 @@ internal class TLinkTransport : ITLinkTransport
         var packetHex = ILoggerExtensions.Enumerable2HexString(packetSequence.ToArray());
 
         if (!reader.TryReadTo(out ReadOnlySequence<byte> headerSeq, (byte)0x7E, advancePastDelimiter: true))
-            return Result<TLinkMessage>.Fail(TLinkPacketException.Code.FramingError, "Missing header delimiter 0x7E", packetHex);
+            return Result<TLinkMessage>.Fail(TLinkErrorCode.FramingError, "Missing header delimiter 0x7E", packetHex);
 
         if (!reader.TryReadTo(out ReadOnlySequence<byte> payloadSeq, (byte)0x7F, advancePastDelimiter: true))
-            return Result<TLinkMessage>.Fail(TLinkPacketException.Code.FramingError, "Missing payload delimiter 0x7F", packetHex);
+            return Result<TLinkMessage>.Fail(TLinkErrorCode.FramingError, "Missing payload delimiter 0x7F", packetHex);
 
         var headerResult = Unstuff(headerSeq);
         if (headerResult.IsFailure)
@@ -191,11 +191,11 @@ internal class TLinkTransport : ITLinkTransport
         }
         catch (OperationCanceledException)
         {
-            return Result.Fail(TLinkPacketException.Code.Cancelled, "Send was cancelled");
+            return Result.Fail(TLinkErrorCode.Cancelled, "Send was cancelled");
         }
         catch (Exception ex)
         {
-            return Result.Fail(TLinkPacketException.Code.Disconnected, $"Send failed: {ex.Message}");
+            return Result.Fail(TLinkErrorCode.Disconnected, $"Send failed: {ex.Message}");
         }
     }
 
@@ -222,9 +222,9 @@ internal class TLinkTransport : ITLinkTransport
     private static Result<byte[]> Unstuff(ReadOnlySequence<byte> sequence)
     {
         if (sequence.PositionOf((byte)0x7E).HasValue)
-            return Result<byte[]>.Fail(TLinkPacketException.Code.EncodingError, "Invalid byte 0x7E in encoded data");
+            return Result<byte[]>.Fail(TLinkErrorCode.EncodingError, "Invalid byte 0x7E in encoded data");
         if (sequence.PositionOf((byte)0x7F).HasValue)
-            return Result<byte[]>.Fail(TLinkPacketException.Code.EncodingError, "Invalid byte 0x7F in encoded data");
+            return Result<byte[]>.Fail(TLinkErrorCode.EncodingError, "Invalid byte 0x7F in encoded data");
 
         var reader = new SequenceReader<byte>(sequence);
         var result = new ArrayBufferWriter<byte>((int)sequence.Length);
@@ -237,7 +237,7 @@ internal class TLinkTransport : ITLinkTransport
                     result.Write(segment.Span);
 
                 if (!reader.TryRead(out byte escaped))
-                    return Result<byte[]>.Fail(TLinkPacketException.Code.EncodingError, "Unexpected end after escape byte 0x7D");
+                    return Result<byte[]>.Fail(TLinkErrorCode.EncodingError, "Unexpected end after escape byte 0x7D");
 
                 byte decoded = escaped switch
                 {
@@ -248,7 +248,7 @@ internal class TLinkTransport : ITLinkTransport
                 };
 
                 if (escaped > 0x02)
-                    return Result<byte[]>.Fail(TLinkPacketException.Code.EncodingError, $"Unknown escape value 0x{escaped:X2}");
+                    return Result<byte[]>.Fail(TLinkErrorCode.EncodingError, $"Unknown escape value 0x{escaped:X2}");
 
                 result.Write(new byte[] { decoded });
             }

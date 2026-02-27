@@ -1,11 +1,10 @@
 namespace DSC.TLink;
 
 /// <summary>
-/// Represents a TLink operation failure without throwing an exception.
-/// Carries the same error codes as <see cref="TLinkPacketException.Code"/>.
+/// Represents a TLink operation failure carried in a <see cref="Result"/> or <see cref="Result{T}"/>.
 /// </summary>
 public readonly record struct TLinkError(
-    TLinkPacketException.Code Code,
+    TLinkErrorCode Code,
     string Message,
     string? PacketData = null)
 {

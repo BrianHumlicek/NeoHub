@@ -31,29 +31,22 @@ public readonly struct Result<T>
 
     public bool IsFailure => _error is not null;
 
-    /// <summary>
-    /// The success value. Only valid when <see cref="IsSuccess"/> is true.
-    /// </summary>
+    /// <summary>The success value. Only valid when <see cref="IsSuccess"/> is true.</summary>
     public T Value => IsSuccess ? _value : throw new InvalidOperationException($"Cannot access Value on a failed result: {_error}");
 
-    /// <summary>
-    /// The error. Only valid when <see cref="IsFailure"/> is true.
-    /// </summary>
+    /// <summary>The error. Only valid when <see cref="IsFailure"/> is true.</summary>
     public TLinkError? Error => _error;
 
-    /// <summary>
-    /// Pattern-match on success or failure.
-    /// </summary>
+    /// <summary>Pattern-match on success or failure.</summary>
     public TResult Match<TResult>(Func<T, TResult> onSuccess, Func<TLinkError, TResult> onFailure) =>
         IsSuccess ? onSuccess(_value) : onFailure(_error!.Value);
 
-    // Implicit conversions for ergonomic usage
     public static implicit operator Result<T>(T value) => new(value);
     public static implicit operator Result<T>(TLinkError error) => new(error);
 
     public static Result<T> Ok(T value) => new(value);
     public static Result<T> Fail(TLinkError error) => new(error);
-    public static Result<T> Fail(TLinkPacketException.Code code, string message, string? packetData = null) =>
+    public static Result<T> Fail(TLinkErrorCode code, string message, string? packetData = null) =>
         new(new TLinkError(code, message, packetData));
 }
 
@@ -79,7 +72,7 @@ public readonly struct Result
 
     public static Result Ok() => new(null);
     public static Result Fail(TLinkError error) => new(error);
-    public static Result Fail(TLinkPacketException.Code code, string message, string? packetData = null) =>
+    public static Result Fail(TLinkErrorCode code, string message, string? packetData = null) =>
         new(new TLinkError(code, message, packetData));
 
     public static implicit operator Result(TLinkError error) => Fail(error);

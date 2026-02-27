@@ -34,7 +34,7 @@ namespace DSC.TLink.Extensions
         }
         public static void PopAndSetValue(this ref ReadOnlySpan<byte> span, Action<byte> setterAction, [CallerArgumentExpression(nameof(setterAction))] string? message = null)
         {
-            if (!span.TryPopAndSetValue(setterAction)) throw new Exception();
+            if (!span.TryPopAndSetValue(setterAction)) throw new InvalidOperationException($"Not enough data to read byte: {message}");
         }
         public static bool TryPopAndSetValue(this ref ReadOnlySpan<byte> span, Action<byte> setter)
         {
@@ -54,14 +54,14 @@ namespace DSC.TLink.Extensions
 
         public static byte[] PopFixedArray(this ref ReadOnlySpan<byte> span, int Length)
         {
-            if (span.Length < Length) throw new TLinkPacketException(TLinkPacketException.Code.EncodingError, "Not enough data to read fixed array");
+            if (span.Length < Length) throw new InvalidOperationException($"Not enough data to read fixed array of length {Length}; only {span.Length} bytes remain");
             var bytes = span.Slice(0, Length).ToArray();
             span = span.Slice(Length);
             return bytes;
         }
         public static void PopAndSetValue(this ref ReadOnlySpan<byte> span, Action<ushort> setter, [CallerArgumentExpression(nameof(setter))] string? message = null)
         {
-            if (!span.TryPopAndSetValue(setter)) throw new Exception();
+            if (!span.TryPopAndSetValue(setter)) throw new InvalidOperationException($"Not enough data to read ushort: {message}");
         }
         public static bool TryPopAndSetValue(this ref ReadOnlySpan<byte> span, Action<ushort> setter)
         {
@@ -72,7 +72,7 @@ namespace DSC.TLink.Extensions
         }
         public static ushort PopTrailingWord(this ref ReadOnlySpan<byte> span)
         {
-            if (span.Length < 2) throw new Exception();
+            if (span.Length < 2) throw new InvalidOperationException("Not enough data to read trailing word");
             int wordIndex = span.Length - 2;
             ushort result = BigEndianExtensions.U16(span, wordIndex);
             span = span.Slice(0, wordIndex);

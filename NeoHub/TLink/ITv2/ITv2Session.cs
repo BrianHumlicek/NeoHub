@@ -119,14 +119,22 @@ internal sealed class ITv2Session : IITv2Session
 
     private async Task<Result> PerformHandshakeAsync(CancellationToken ct)
     {
-        // Handshake is a sequence of synchronous command transactions.
-        // See docs/TLink-ITv2-Protocol.md "Session Establishment" for the full 12-step flow.
-        //
-        // We can't use SendMessageAsync here because it relies on the receive pump
-        // (which isn't running yet) to route responses to pending receivers.
-        // Instead we drive each transaction inline: send → receive → ack.
+        try
+        {
+            return await DoHandshakeAsync(ct);
+        }
+        catch (OperationCanceledException)
+        {
+            return Result.Fail(TLinkErrorCode.Cancelled, "Handshake was cancelled");
+        }
+        catch (Exception ex)
+        {
+            return Result.Fail(TLinkErrorCode.PacketParseError, $"Handshake failed: {ex.Message}");
+        }
+    }
 
-        // Sync reply to an inbound command — no local sequence increment, echoes remote's sender sequence.
+    private async Task<Result> DoHandshakeAsync(CancellationToken ct)
+    {
         async Task AckInboundCommandAsync(byte commandSequence, byte remoteSenderSeq)
         {
             var response = new CommandResponse { CommandSequence = commandSequence };
@@ -387,7 +395,7 @@ internal sealed class ITv2Session : IITv2Session
         {
             var tlinkResult = await _transport.ReadMessageAsync(ct);
             if (tlinkResult.IsFailure)
-                throw new InvalidOperationException($"Transport error: {tlinkResult.Error}");
+                throw new InvalidOperationException($"Transport error during handshake: {tlinkResult.Error}");
 
             var packetResult = ParseITv2Packet(tlinkResult.Value.Payload);
             if (packetResult.IsSuccess)
@@ -442,7 +450,7 @@ internal sealed class ITv2Session : IITv2Session
         catch (Exception ex)
         {
             return Result<ITv2Packet>.Fail(
-                TLinkPacketException.Code.FramingError,
+                TLinkErrorCode.PacketParseError,
                 $"Failed to parse ITv2 packet: {ex.Message}");
         }
     }
