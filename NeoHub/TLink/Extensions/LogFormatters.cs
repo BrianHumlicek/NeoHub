@@ -21,136 +21,124 @@ using DSC.TLink.ITv2.Messages;
 namespace DSC.TLink.Extensions;
 
 /// <summary>
-/// Lazy formatting structs for logging. These are value types that capture a reference
-/// to the data but defer all formatting work to ToString(), which the logging pipeline
-/// only calls after confirming the log level is enabled. This means zero cost when
-/// the log level is off — no string allocations, no hex conversions, no reflection.
-/// 
-/// Usage:
-///   _logger.LogTrace("Sent {Bytes}", new HexBytes(bytes));
-///   _logger.LogDebug("Received {Message}", new MessageLog(message));
+/// Lazy hex formatter for byte data.
+/// Defers all formatting to <see cref="ToString"/> so the logging pipeline incurs zero cost
+/// when the log level is disabled.
+/// Usage: _logger.LogTrace("TX {Bytes}", new HexBytes(data));
+/// To get a string eagerly (e.g. for error messages): new HexBytes(data).ToString()
 /// </summary>
-public static class LogFormatters
+public readonly struct HexBytes
 {
-    /// <summary>
-    /// Lazy hex formatter for byte data. Formats as [XX-XX-XX-...] only when ToString() is called.
-    /// </summary>
-    public readonly struct HexBytes
+    private readonly ReadOnlyMemory<byte> _data;
+
+    public HexBytes(byte[] data) => _data = data;
+    public HexBytes(ReadOnlyMemory<byte> data) => _data = data;
+
+    public override string ToString()
     {
-        private readonly ReadOnlyMemory<byte> _data;
+        var span = _data.Span;
+        if (span.IsEmpty) return "[]";
 
-        public HexBytes(byte[] data) => _data = data;
-        public HexBytes(ReadOnlyMemory<byte> data) => _data = data;
-
-        public override string ToString()
+        var sb = new StringBuilder(span.Length * 3 + 1);
+        sb.Append('[');
+        for (int i = 0; i < span.Length; i++)
         {
-            var span = _data.Span;
-            if (span.IsEmpty) return "[]";
+            if (i > 0) sb.Append('-');
+            sb.Append(span[i].ToString("X2"));
+        }
+        sb.Append(']');
+        return sb.ToString();
+    }
+}
 
-            // Pre-allocate: each byte is "XX" (2 chars) + separator "-" (1 char), minus last separator, plus brackets
-            var sb = new StringBuilder(span.Length * 3 + 1);
-            sb.Append('[');
-            for (int i = 0; i < span.Length; i++)
-            {
-                if (i > 0) sb.Append('-');
-                sb.Append(span[i].ToString("X2"));
-            }
-            sb.Append(']');
-            return sb.ToString();
+/// <summary>
+/// Lazy message formatter. Pretty-prints message type and all properties with indentation.
+/// Handles nested message arrays, byte arrays (as hex), and complex object arrays.
+/// Only performs reflection and formatting when <see cref="ToString"/> is actually called.
+/// Usage: _logger.LogDebug("RX {Message}", new MessageLog(message));
+/// </summary>
+public readonly struct MessageLog
+{
+    private readonly IMessageData _message;
+
+    public MessageLog(IMessageData message) => _message = message;
+
+    public override string ToString()
+    {
+        if (_message is null) return "null";
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"[{_message.GetType().Name}]");
+        AppendProperties(sb, _message, indentLevel: 1);
+        return sb.ToString();
+    }
+
+    private static void AppendProperties(StringBuilder sb, object obj, int indentLevel)
+    {
+        var indent = new string(' ', indentLevel * 5);
+        var properties = obj.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance);
+
+        foreach (var prop in properties)
+        {
+            var value = prop.GetValue(obj);
+            var formatted = FormatValue(value, indentLevel);
+            sb.Append($"{indent}{prop.Name} = {formatted}");
+            if (!formatted.Contains('\n'))
+                sb.AppendLine();
         }
     }
 
-    /// <summary>
-    /// Lazy message formatter. Pretty-prints message type and all properties with indentation.
-    /// Handles nested message arrays, byte arrays (as hex), and complex object arrays.
-    /// Only performs reflection and formatting when ToString() is actually called.
-    /// </summary>
-    public readonly struct MessageLog
+    private static string FormatValue(object? value, int indentLevel) => value switch
     {
-        private readonly IMessageData _message;
+        null => "null",
+        byte[] bytes => new HexBytes(bytes).ToString(),
+        IEnumerable<byte> bytes => new HexBytes(bytes.ToArray()).ToString(),
+        string str => $"\"{str}\"",
+        IMessageData[] messages => FormatMessageArray(messages, indentLevel),
+        Array array when IsComplexArray(array) => FormatObjectArray(array, indentLevel),
+        _ => value.ToString() ?? "null"
+    };
 
-        public MessageLog(IMessageData message) => _message = message;
+    private static string FormatMessageArray(IMessageData[] messages, int indentLevel)
+    {
+        if (messages.Length == 0) return "[]";
 
-        public override string ToString()
+        var sb = new StringBuilder();
+        sb.AppendLine($"[{messages.Length} messages]");
+
+        var indent = new string(' ', (indentLevel + 1) * 5);
+        for (int i = 0; i < messages.Length; i++)
         {
-            if (_message is null) return "null";
-
-            var sb = new StringBuilder();
-            var type = _message.GetType();
-
-            sb.AppendLine($"[{type.Name}]");
-            AppendProperties(sb, _message, indentLevel: 1);
-
-            return sb.ToString();
+            sb.AppendLine($"{indent}[{i}] {messages[i].GetType().Name}");
+            AppendProperties(sb, messages[i], indentLevel + 2);
         }
+        return sb.ToString();
+    }
 
-        private static void AppendProperties(StringBuilder sb, object obj, int indentLevel)
+    private static string FormatObjectArray(Array array, int indentLevel)
+    {
+        if (array.Length == 0) return "[]";
+
+        var elementType = array.GetType().GetElementType()!;
+        var sb = new StringBuilder();
+        sb.AppendLine($"[{array.Length} {elementType.Name}]");
+
+        var indent = new string(' ', (indentLevel + 1) * 5);
+        for (int i = 0; i < array.Length; i++)
         {
-            var indent = new string(' ', indentLevel * 5);
-            var properties = obj.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance);
+            var element = array.GetValue(i);
+            if (element is null) { sb.AppendLine($"{indent}[{i}] null"); continue; }
 
-            foreach (var prop in properties)
-            {
-                var value = prop.GetValue(obj);
-                var formatted = FormatValue(value, indentLevel);
-                sb.Append($"{indent}{prop.Name} = {formatted}");
-                if (!formatted.Contains('\n'))
-                    sb.AppendLine();
-            }
+            sb.AppendLine($"{indent}[{i}]");
+            AppendProperties(sb, element, indentLevel + 2);
         }
+        return sb.ToString();
+    }
 
-        private static string FormatValue(object? value, int indentLevel) => value switch
-        {
-            null => "null",
-            byte[] bytes => new HexBytes(bytes).ToString(),
-            IEnumerable<byte> bytes => new HexBytes(bytes.ToArray()).ToString(),
-            string str => $"\"{str}\"",
-            IMessageData[] messages => FormatMessageArray(messages, indentLevel),
-            Array array when IsComplexArray(array) => FormatObjectArray(array, indentLevel),
-            _ => value.ToString() ?? "null"
-        };
-
-        private static string FormatMessageArray(IMessageData[] messages, int indentLevel)
-        {
-            if (messages.Length == 0) return "[]";
-
-            var sb = new StringBuilder();
-            sb.AppendLine($"[{messages.Length} messages]");
-
-            var indent = new string(' ', (indentLevel + 1) * 5);
-            for (int i = 0; i < messages.Length; i++)
-            {
-                sb.AppendLine($"{indent}[{i}] {messages[i].GetType().Name}");
-                AppendProperties(sb, messages[i], indentLevel + 2);
-            }
-            return sb.ToString();
-        }
-
-        private static string FormatObjectArray(Array array, int indentLevel)
-        {
-            if (array.Length == 0) return "[]";
-
-            var elementType = array.GetType().GetElementType()!;
-            var sb = new StringBuilder();
-            sb.AppendLine($"[{array.Length} {elementType.Name}]");
-
-            var indent = new string(' ', (indentLevel + 1) * 5);
-            for (int i = 0; i < array.Length; i++)
-            {
-                var element = array.GetValue(i);
-                if (element is null) { sb.AppendLine($"{indent}[{i}] null"); continue; }
-
-                sb.AppendLine($"{indent}[{i}]");
-                AppendProperties(sb, element, indentLevel + 2);
-            }
-            return sb.ToString();
-        }
-
-        private static bool IsComplexArray(Array array)
-        {
-            var elementType = array.GetType().GetElementType();
-            if (elementType is null || elementType == typeof(byte)) return false;
-            return Type.GetTypeCode(elementType) == TypeCode.Object && !elementType.IsEnum;
-        }
+    private static bool IsComplexArray(Array array)
+    {
+        var elementType = array.GetType().GetElementType();
+        if (elementType is null || elementType == typeof(byte)) return false;
+        return Type.GetTypeCode(elementType) == TypeCode.Object && !elementType.IsEnum;
     }
 }

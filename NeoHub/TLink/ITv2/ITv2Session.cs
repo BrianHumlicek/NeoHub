@@ -22,7 +22,6 @@ using Microsoft.Extensions.Logging;
 using System.IO.Pipelines;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
-using static DSC.TLink.Extensions.LogFormatters;
 
 namespace DSC.TLink.ITv2;
 

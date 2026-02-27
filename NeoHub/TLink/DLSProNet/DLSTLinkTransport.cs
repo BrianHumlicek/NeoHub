@@ -97,7 +97,7 @@ internal sealed class DLSTLinkTransport : TLinkTransport, IDisposable
             return Result<ReadOnlySequence<byte>>.Fail(
                 TLinkErrorCode.EncryptionError,
                 $"AES decryption failed: {ex.Message}",
-                ILoggerExtensions.Enumerable2HexString(rawPacket.ToArray()));
+                new HexBytes(rawPacket.ToArray()).ToString());
         }
     }
 

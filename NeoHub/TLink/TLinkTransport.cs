@@ -135,7 +135,7 @@ internal class TLinkTransport : ITLinkTransport
     private static Result<TLinkMessage> ParseFrame(ReadOnlySequence<byte> packetSequence)
     {
         var reader = new SequenceReader<byte>(packetSequence);
-        var packetHex = ILoggerExtensions.Enumerable2HexString(packetSequence.ToArray());
+        var packetHex = new HexBytes(packetSequence.ToArray()).ToString();
 
         if (!reader.TryReadTo(out ReadOnlySequence<byte> headerSeq, (byte)0x7E, advancePastDelimiter: true))
             return Result<TLinkMessage>.Fail(TLinkErrorCode.FramingError, "Missing header delimiter 0x7E", packetHex);
