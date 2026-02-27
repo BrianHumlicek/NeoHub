@@ -1,4 +1,4 @@
-﻿// DSC TLink - a communications library for DSC Powerseries NEO alarm panels
+// DSC TLink - a communications library for DSC Powerseries NEO alarm panels
 // Copyright (C) 2024 Brian Humlicek
 //
 // This program is free software: you can redistribute it and/or modify
@@ -7,25 +7,21 @@
 // (at your option) any later version.
 //
 // This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY, without even the implied warranty of
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
 //
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-using DSC.TLink.ITv2.Enumerations;
-using DSC.TLink.Serialization;
+using DSC.TLink.ITv2.Messages;
 
-namespace DSC.TLink.ITv2.Messages
-{
-	[ITv2Command(ITv2Command.ModuleControl_Partition_Arm_Control)]
-	public record PartitionArm : CommandMessageBase
-	{
-        [CompactInteger]
-		public int Partition { get; init; }
-		public ArmingMode ArmMode { get; init; }
-		[BCDString]
-		public string AccessCode { get; init; } = String.Empty;
-	}
-}
+namespace DSC.TLink.ITv2;
+
+/// <summary>
+/// Represents a parsed ITv2 packet (after ITv2 framing and decryption are removed).
+/// </summary>
+internal readonly record struct ITv2Packet(
+    byte SenderSequence,
+    byte ReceiverSequence,
+    IMessageData Message);

@@ -10,17 +10,9 @@ namespace DSC.TLink.ITv2.Messages
     internal sealed class ITv2CommandAttribute : Attribute
     {
         public ITv2Command Command { get; }
-        public bool IsAppSequence { get; }
-
         public ITv2CommandAttribute(ITv2Command command)
         {
             Command = command;
-        }
-
-        public ITv2CommandAttribute(ITv2Command command, bool isAppSequence)
-        {
-            Command = command;
-            IsAppSequence = isAppSequence;
         }
     }
 }

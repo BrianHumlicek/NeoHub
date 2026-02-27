@@ -1,8 +1,8 @@
+using DSC.TLink.Extensions;
+using Microsoft.Extensions.Logging;
 using System.Buffers;
 using System.IO.Pipelines;
 using System.Runtime.CompilerServices;
-using DSC.TLink.Extensions;
-using Microsoft.Extensions.Logging;
 
 namespace DSC.TLink;
 
@@ -36,9 +36,21 @@ internal sealed class TLinkTransport : ITLinkTransport
     public async IAsyncEnumerable<Result<TLinkMessage>> ReadAllAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var result = await ReadMessageAsync(cancellationToken);
+            if (result.IsFailure)
+                yield break;
+
+            yield return result;
+        }
+    }
+
+    public async Task<Result<TLinkMessage>> ReadMessageAsync(CancellationToken cancellationToken = default)
+    {
         var reader = _pipe.Input;
 
-        while (!cancellationToken.IsCancellationRequested)
+        while (true)
         {
             ReadResult readResult;
             try
@@ -47,43 +59,46 @@ internal sealed class TLinkTransport : ITLinkTransport
             }
             catch (OperationCanceledException)
             {
-                yield break;
+                return Result<TLinkMessage>.Fail(TLinkPacketException.Code.Cancelled, "Read was cancelled");
             }
 
             var buffer = readResult.Buffer;
 
-            while (_adapter.TryExtractPacket(ref buffer, out var rawPacket))
+            try
             {
-                // Step 1: Let adapter transform (e.g. DLS decryption)
-                var transformResult = _adapter.TransformInbound(rawPacket);
-                if (transformResult.IsFailure)
+                if (_adapter.TryExtractPacket(ref buffer, out var rawPacket))
                 {
-                    _logger.LogWarning("Inbound transform failed: {Error}", transformResult.Error);
-                    yield return Result<TLinkMessage>.Fail(transformResult.Error!.Value);
-                    continue;
-                }
+                    var transformResult = _adapter.TransformInbound(rawPacket);
+                    if (transformResult.IsFailure)
+                    {
+                        _logger.LogWarning("Inbound transform failed: {Error}", transformResult.Error);
+                        return Result<TLinkMessage>.Fail(transformResult.Error!.Value);
+                    }
 
-                // Step 2: Parse the standard TLink frame (header|0x7E|payload|0x7F + unstuffing)
-                var parseResult = ParseFrame(transformResult.Value);
-                if (parseResult.IsSuccess && !_headerCaptured)
-                {
-                    _defaultHeader = parseResult.Value.Header;
-                    _headerCaptured = true;
-                }
+                    var parseResult = ParseFrame(transformResult.Value);
+                    if (parseResult.IsSuccess && !_headerCaptured)
+                    {
+                        _defaultHeader = parseResult.Value.Header;
+                        _headerCaptured = true;
+                    }
 
-                yield return parseResult;
+                    return parseResult;
+                }
             }
-
-            reader.AdvanceTo(buffer.Start, buffer.End);
+            finally
+            {
+                reader.AdvanceTo(buffer.Start, buffer.End);
+            }
 
             if (readResult.IsCompleted)
             {
                 _logger.LogInformation("Transport completed (remote closed)");
-                yield break;
+                return Result<TLinkMessage>.Fail(TLinkPacketException.Code.Disconnected, "Transport completed");
             }
+
+            // Not enough data yet — loop back to ReadAsync for more bytes
         }
     }
-
     private static Result<TLinkMessage> ParseFrame(ReadOnlySequence<byte> packetSequence)
     {
         var reader = new SequenceReader<byte>(packetSequence);

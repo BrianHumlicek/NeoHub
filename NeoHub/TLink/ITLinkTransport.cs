@@ -9,6 +9,12 @@ namespace DSC.TLink;
 public interface ITLinkTransport : IAsyncDisposable
 {
     /// <summary>
+    /// Reads a single inbound TLink message. Blocks until a complete message arrives.
+    /// Returns a failure result on disconnect or cancellation.
+    /// </summary>
+    Task<Result<TLinkMessage>> ReadMessageAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Lazily yields inbound TLink messages as they arrive on the wire.
     /// Recoverable errors (framing, encoding) are yielded as failed results.
     /// The stream completes naturally when the remote endpoint disconnects.
