@@ -185,7 +185,7 @@ internal class TLinkTransport : ITLinkTransport
 
         try
         {
-            _logger.LogTrace("Sent {Packet}", transformResult.Value);
+            _logger.LogTrace("Sent {Packet}", new HexBytes(transformResult.Value));
             await _pipe.Output.WriteAsync(transformResult.Value, cancellationToken);
             return Result.Ok();
         }
