@@ -18,6 +18,14 @@ using DSC.TLink.ITv2.Messages;
 
 namespace DSC.TLink.ITv2;
 
+internal interface IMessageReceiver : IDisposable
+{
+    bool TryReceive(ITv2Packet packet);
+    bool TryReceiveSubMessage(IMessageData message);
+    Task<IMessageData?> Result(CancellationToken ct);
+    bool IsCompleted { get; }
+}
+
 /// <summary>
 /// Tracks a pending outbound message waiting for a response.
 ///
@@ -25,7 +33,7 @@ namespace DSC.TLink.ITv2;
 /// For commands: completes when a command message arrives with matching CommandSequence
 /// (SimpleAck just marks protocol-level acknowledgement for async responses).
 /// </summary>
-internal sealed class MessageReceiver : IDisposable
+internal sealed class MessageReceiver : IMessageReceiver
 {
     private readonly byte _senderSequence;
     private readonly byte? _commandSequence;
@@ -44,35 +52,26 @@ internal sealed class MessageReceiver : IDisposable
     public static MessageReceiver CreateCommandReceiver(byte senderSequence, byte commandSequence)
         => new(senderSequence, commandSequence);
 
-    /// <summary>
-    /// Try to match an inbound packet to this receiver.
-    /// Handles both protocol-level (SimpleAck) and command-level (CommandSequence) correlation.
-    /// Returns true if the packet was consumed.
-    /// </summary>
     public bool TryReceive(ITv2Packet packet)
     {
-        // Protocol correlation: SimpleAck whose ReceiverSequence matches our SenderSequence
         if (packet.ReceiverSequence == _senderSequence && packet.Message is SimpleAck)
         {
             if (_commandSequence is null)
-                _tcs.TrySetResult(null); // Notification complete
-            // else: command receiver — protocol acked, still waiting for command response (async pattern)
+                _tcs.TrySetResult(null);
             return true;
         }
 
-        // Command correlation: ICommandMessage whose CommandSequence matches ours
         if (packet.Message is ICommandMessage commandMessage)
-        {
-            return TryReceive(commandMessage);
-        }
+            return TryReceiveSubMessage(commandMessage);
 
         return false;
     }
-    public bool TryReceive(ICommandMessage commandMessage)
+
+    public bool TryReceiveSubMessage(IMessageData message)
     {
-        if (_commandSequence is not null && commandMessage.CommandSequence == _commandSequence)
+        if (_commandSequence is not null && message is ICommandMessage cmd && cmd.CommandSequence == _commandSequence)
         {
-            _tcs.TrySetResult(commandMessage); // Command complete
+            _tcs.TrySetResult(cmd);
             return true;
         }
         return false;

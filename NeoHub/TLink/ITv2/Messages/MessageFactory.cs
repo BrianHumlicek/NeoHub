@@ -66,35 +66,26 @@ namespace DSC.TLink.ITv2.Messages
 
         /// <summary>
         /// Deserialize bytes for a known command into a strongly-typed message object.
+        /// If the registered type fails to deserialize, falls back to <see cref="DefaultMessage"/>
+        /// so the packet is never silently dropped and receivers can still match by command.
         /// </summary>
         public static IMessageData DeserializeMessage(ITv2Command command, ReadOnlySpan<byte> payload)
         {
-            var messageType = typeof(DefaultMessage);
-            
             if (_commandLookup.TryGetValue(command, out var type))
             {
-                messageType = type;
+                try
+                {
+                    return (IMessageData)BinarySerializer.Deserialize(type, payload);
+                }
+                catch
+                {
+                    // Typed deserialization failed; fall back to DefaultMessage below
+                }
             }
 
-            try
-            {
-                var message = BinarySerializer.Deserialize(messageType, payload);
-                if (message is not IMessageData typedMessage)
-                {
-                    throw new InvalidOperationException(
-                        $"Deserialized message type '{messageType.FullName}' does not implement IMessageData.");
-                }
-                else if (message is DefaultMessage defaultMessage)
-                {
-                    defaultMessage.Command = command;
-                }
-                return typedMessage;
-            }
-            catch (Exception ex) when (ex is not InvalidOperationException)
-            {
-                throw new InvalidOperationException(
-                    $"Failed to deserialize message for command '{command}' into type '{messageType.FullName}'.", ex);
-            }
+            var defaultMsg = (DefaultMessage)BinarySerializer.Deserialize(typeof(DefaultMessage), payload);
+            defaultMsg.Command = command;
+            return defaultMsg;
         }
 
         /// <summary>
@@ -163,5 +154,11 @@ namespace DSC.TLink.ITv2.Messages
                 $"No command registered for message type '{messageType.FullName}'. " +
                 $"Ensure the message type is decorated with ITv2CommandAttribute.");
         }
+
+        internal static IEnumerable<(ITv2Command Command, Type MessageType)> GetRegisteredTypes()
+            => _typeLookup.Select(kvp => (Command: kvp.Value, MessageType: kvp.Key));
+
+        internal static Type? GetMessageType(ITv2Command command)
+            => _commandLookup.TryGetValue(command, out var type) ? type : null;
     }
 }

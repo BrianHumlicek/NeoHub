@@ -23,10 +23,14 @@ namespace DSC.TLink.Serialization
         ByteArrayLeadingLength,
         ByteArrayUnbounded,
         ObjectArrayLeadingLength,
+        UnicodeStringArrayUnbounded,
+        FixedLengthUnicodeStringArrayUnbounded,
         DateTime,
         MultipleMessagePacket,
         BitFieldGroupLeader,
         BitFieldGroupMember,
+        EnumArrayLeadingLength,
+        EnumArrayUnbounded,
     }
 
     internal enum DateTimeFormatType

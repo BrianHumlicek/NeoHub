@@ -42,7 +42,7 @@ namespace DSC.TLink.ITv2
             if (lengthByte1.Bit7())
             {
                 byte lengthByte2 = bytes.PopByte();
-                ushort encodedLength = BigEndianExtensions.U16((byte)(lengthByte1 & 0x7F), bytes.PopByte());
+                ushort encodedLength = BigEndianExtensions.U16((byte)(lengthByte1 & 0x7F), lengthByte2);
                 if (encodedLength > bytes.Length)
                     throw new InvalidOperationException($"Encoded message length {encodedLength} exceeds data length {bytes.Length}\nMessage {new HexBytes(bytes.ToArray())}");
                 bytes = bytes.Slice(0, encodedLength);
