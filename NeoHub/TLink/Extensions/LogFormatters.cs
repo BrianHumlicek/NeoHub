@@ -52,6 +52,56 @@ public readonly struct HexBytes
 }
 
 /// <summary>
+/// Hex editor-style grid formatter for larger byte arrays.
+/// Produces 16 bytes per row with a mid-row space, a leading offset column, and a length header.
+/// Usage: new HexGrid(data).ToString()
+/// </summary>
+public readonly struct HexGrid
+{
+    private const int BytesPerRow = 16;
+    private const int HalfRow = BytesPerRow / 2;
+    private readonly ReadOnlyMemory<byte> _data;
+
+    public HexGrid(byte[] data) => _data = data;
+    public HexGrid(ReadOnlyMemory<byte> data) => _data = data;
+
+    public override string ToString()
+    {
+        var span = _data.Span;
+        if (span.IsEmpty) return "0 bytes";
+
+        // header: "N bytes"
+        // each row: "XXXX  XX XX ... XX  XX XX ... XX\n"
+        // offset(4) + 2 spaces + 8*(XX + space) + 1 extra space + 8*(XX + space)
+        var sb = new StringBuilder();
+        sb.AppendLine($"{span.Length} bytes");
+
+        for (int row = 0; row < span.Length; row += BytesPerRow)
+        {
+            sb.Append(row.ToString("X4"));
+            sb.Append("  ");
+
+            for (int col = 0; col < BytesPerRow; col++)
+            {
+                if (col == HalfRow) sb.Append(' ');
+
+                int idx = row + col;
+                if (idx < span.Length)
+                    sb.Append(span[idx].ToString("X2"));
+                else
+                    sb.Append("  ");  // pad incomplete final row
+
+                if (col < BytesPerRow - 1) sb.Append(' ');
+            }
+
+            sb.AppendLine();
+        }
+
+        return sb.ToString();
+    }
+}
+
+/// <summary>
 /// Lazy message formatter. Pretty-prints message type and all properties with indentation.
 /// Handles nested message arrays, byte arrays (as hex), and complex object arrays.
 /// Only performs reflection and formatting when <see cref="ToString"/> is actually called.
@@ -91,13 +141,30 @@ public readonly struct MessageLog
     private static string FormatValue(object? value, int indentLevel) => value switch
     {
         null => "null",
+        byte[] bytes when bytes.Length > 8 => new HexGrid(bytes).ToString(),
         byte[] bytes => new HexBytes(bytes).ToString(),
         IEnumerable<byte> bytes => new HexBytes(bytes.ToArray()).ToString(),
         string str => $"\"{str}\"",
+        string[] strs => FormatStringArray(strs, indentLevel),
         IMessageData[] messages => FormatMessageArray(messages, indentLevel),
+        Array array when array.GetType().GetElementType()?.IsEnum == true => FormatEnumArray(array, indentLevel),
         Array array when IsComplexArray(array) => FormatObjectArray(array, indentLevel),
         _ => value.ToString() ?? "null"
     };
+
+    private static string FormatStringArray(string[] strs, int indentLevel)
+    {
+        if (strs.Length == 0) return "[]";
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"[{strs.Length} strings]");
+
+        var indent = new string(' ', (indentLevel + 1) * 5);
+        for (int i = 0; i < strs.Length; i++)
+            sb.AppendLine($"{indent}[{i}] \"{strs[i]}\"");
+
+        return sb.ToString();
+    }
 
     private static string FormatMessageArray(IMessageData[] messages, int indentLevel)
     {
@@ -111,6 +178,27 @@ public readonly struct MessageLog
         {
             sb.AppendLine($"{indent}[{i}] {messages[i].GetType().Name}");
             AppendProperties(sb, messages[i], indentLevel + 2);
+        }
+        return sb.ToString();
+    }
+
+    private static string FormatEnumArray(Array array, int indentLevel)
+    {
+        if (array.Length == 0) return "[]";
+
+        var elementType = array.GetType().GetElementType()!;
+        bool isFlags = elementType.IsDefined(typeof(FlagsAttribute), false);
+        var sb = new StringBuilder();
+        sb.AppendLine($"[{array.Length} {elementType.Name}]");
+
+        var indent = new string(' ', (indentLevel + 1) * 5);
+        for (int i = 0; i < array.Length; i++)
+        {
+            var element = array.GetValue(i)!;
+            string display = isFlags
+                ? $"{element} (0x{Convert.ToUInt64(element):X2})"
+                : element.ToString()!;
+            sb.AppendLine($"{indent}[{i}] {display}");
         }
         return sb.ToString();
     }
