@@ -48,7 +48,7 @@ internal sealed class ITv2Session : IITv2Session
     private readonly CancellationTokenSource _shutdownCts = new();
 
     // Pending receivers for outbound messages awaiting responses
-    private readonly List<MessageReceiver> _pendingReceivers = new();
+    private readonly List<IMessageReceiver> _pendingReceivers = new();
 
     // Sequence state
     private byte _localSequence = 1;
@@ -293,9 +293,9 @@ internal sealed class ITv2Session : IITv2Session
 
             foreach (var subMessage in multiMsg.Messages)
             {
-                if (subMessage is ICommandMessage commandMessage && _pendingReceivers.Any(receiver => receiver.TryReceive(commandMessage)))
+                if (_pendingReceivers.Any(r => r.TryReceiveSubMessage(subMessage)))
                 {
-                    _logger.LogDebug("Routed embedded command response: {MessageType}", subMessage.GetType().Name);
+                    _logger.LogDebug("Routed sub-message to pending receiver: {MessageType}", subMessage.GetType().Name);
                     CleanupCompletedReceivers();
                     continue;
                 }
@@ -330,7 +330,7 @@ internal sealed class ITv2Session : IITv2Session
     /// </summary>
     private async Task<Result<IMessageData>> SendMessageAsync(IMessageData message, CancellationToken ct)
     {
-        MessageReceiver receiver;
+        IMessageReceiver receiver;
 
         // Lock only protects building/sending the packet and registering the receiver.
         // The response await happens outside the lock.
@@ -339,7 +339,15 @@ internal sealed class ITv2Session : IITv2Session
         {
             var senderSeq = GetNextLocalSequence();
 
-            if (message is ICommandMessage cmd)
+            if (message is CommandRequestMessage cmdReq)
+            {
+                var cmdSeq = GetNextCommandSequence();
+                cmdReq.CommandSequence = cmdSeq;
+                receiver = new CommandRequestReceiver(senderSeq, cmdSeq, cmdReq.CommandRequest,
+                    MessageFactory.GetMessageType(cmdReq.CommandRequest),
+                    msg => _notificationChannel.Writer.TryWrite(msg));
+            }
+            else if (message is ICommandMessage cmd)
             {
                 var cmdSeq = GetNextCommandSequence();
                 cmd.CommandSequence = cmdSeq;
@@ -432,7 +440,7 @@ internal sealed class ITv2Session : IITv2Session
         {
             var decrypted = _encryption?.HandleInboundData(payload.ToArray()) ?? payload.ToArray();
             var span = new ReadOnlySpan<byte>(decrypted);
-
+            _logger.LogTrace("RX bytes: {Bytes}", new HexBytes(decrypted));
             ITv2Framing.RemoveFraming(ref span);
 
             byte senderSeq = span.PopByte();
@@ -441,7 +449,6 @@ internal sealed class ITv2Session : IITv2Session
 
             _logger.LogDebug("RX [{SenderSeq}→{ReceiverSeq}] {MessageType}",
                 senderSeq, receiverSeq, message.GetType().Name);
-            _logger.LogTrace("RX bytes: {Bytes}", new HexBytes(decrypted));
 
             if (_logger.IsEnabled(LogLevel.Debug) && message is not SimpleAck)
                 _logger.LogDebug("RX detail: {Message}", new MessageLog(message));
@@ -529,3 +536,4 @@ internal sealed class ITv2Session : IITv2Session
 
     #endregion
 }
+

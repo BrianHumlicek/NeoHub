@@ -26,6 +26,59 @@ namespace DSC.TLink.Serialization
     /// </summary>
     internal static class StringSerializer
     {
+        internal static void WriteFixedLengthUnicodeStringArray(List<byte> bytes, string[]? strings)
+        {
+            strings ??= Array.Empty<string>();
+
+            // Determine the fixed element byte width from the widest string
+            int fixedLen = 0;
+            foreach (var str in strings)
+                fixedLen = Math.Max(fixedLen, Encoding.BigEndianUnicode.GetByteCount(str ?? string.Empty));
+
+            // Leading CompactInteger: byte width of each element
+            CompactIntegerSerializer.Write(bytes, typeof(int), fixedLen);
+
+            foreach (var str in strings)
+            {
+                var encoded = Encoding.BigEndianUnicode.GetBytes(str ?? string.Empty);
+                bytes.AddRange(encoded);
+                for (int i = encoded.Length; i < fixedLen; i++)
+                    bytes.Add(0);
+            }
+        }
+
+        internal static string[] ReadFixedLengthUnicodeStringArrayUnbounded(ReadOnlySpan<byte> bytes, ref int offset)
+        {
+            int fixedLen = (int)CompactIntegerSerializer.Read(bytes, ref offset, typeof(int));
+
+            var list = new List<string>();
+            while (offset < bytes.Length)
+            {
+                if (offset + fixedLen > bytes.Length)
+                    throw new InvalidOperationException(
+                        $"Not enough bytes to read fixed-length unicode string (need {fixedLen}, have {bytes.Length - offset})");
+
+                var str = Encoding.BigEndianUnicode.GetString(bytes.Slice(offset, fixedLen));
+                offset += fixedLen;
+                list.Add(str.TrimEnd('\0'));
+            }
+            return list.ToArray();
+        }
+
+        internal static void WriteUnicodeStringArray(List<byte> bytes, string[]? strings, int lengthBytes)
+        {
+            foreach (var str in strings ?? Array.Empty<string>())
+                WriteUnicodeString(bytes, "[]", str, lengthBytes);
+        }
+
+        internal static string[] ReadUnicodeStringArrayUnbounded(ReadOnlySpan<byte> bytes, ref int offset, string propertyName, int lengthBytes)
+        {
+            var list = new List<string>();
+            while (offset < bytes.Length)
+                list.Add(ReadUnicodeString(bytes, ref offset, propertyName, lengthBytes));
+            return list.ToArray();
+        }
+
         internal static void WriteUnicodeString(List<byte> bytes, string propertyName, string? str, int lengthBytes)
         {
             var encoded = Encoding.Unicode.GetBytes(str ?? string.Empty);

@@ -71,6 +71,8 @@ internal class TLinkTransport : ITLinkTransport
             {
                 if (TryExtractPacket(ref buffer, out var rawPacket))
                 {
+                    _logger.LogTrace("Recv {Packet}", new HexBytes(rawPacket.ToArray()));
+
                     var transformResult = TransformInbound(rawPacket);
                     if (transformResult.IsFailure)
                     {
@@ -79,10 +81,14 @@ internal class TLinkTransport : ITLinkTransport
                     }
 
                     var parseResult = ParseFrame(transformResult.Value);
-                    if (parseResult.IsSuccess && !_headerCaptured)
+                    if (parseResult.IsSuccess)
                     {
-                        _defaultHeader = parseResult.Value.Header;
-                        _headerCaptured = true;
+                        if (!_headerCaptured)
+                        {
+                            _defaultHeader = parseResult.Value.Header;
+                            _headerCaptured = true;
+                        }
+                        _logger.LogTrace("Recv payload {Payload}", new HexBytes(parseResult.Value.Payload));
                     }
 
                     return parseResult;

@@ -127,13 +127,37 @@ namespace DSC.TLink.Serialization
                         bytes.AddRange((byte[]?)pp.Property.GetValue(instance) ?? Array.Empty<byte>());
                         break;
 
+                    case SerializerKind.UnicodeStringArrayUnbounded:
+                        StringSerializer.WriteUnicodeStringArray(bytes, (string[]?)pp.Property.GetValue(instance), pp.LengthPrefixBytes);
+                        break;
+
+                    case SerializerKind.FixedLengthUnicodeStringArrayUnbounded:
+                        StringSerializer.WriteFixedLengthUnicodeStringArray(bytes, (string[]?)pp.Property.GetValue(instance));
+                        break;
+
                     case SerializerKind.ObjectArrayLeadingLength:
                         ObjectArraySerializer.WriteLeadingLength(bytes, pp.Property.Name, pp.Property.GetValue(instance) as Array, pp.LengthPrefixBytes);
                         break;
 
-                    case SerializerKind.DateTime:
-                        DateTimeSerializer.Write(bytes, pp.DateTimeFormat, pp.Property.GetValue(instance), pp.IsNullable);
+                    case SerializerKind.EnumArrayUnbounded:
+                    {
+                        var arr = pp.Property.GetValue(instance) as Array ?? Array.Empty<object>();
+                        foreach (var element in arr)
+                            PrimitiveSerializer.WriteEnum(bytes, pp.TypeCode, element);
                         break;
+                    }
+
+                    case SerializerKind.EnumArrayLeadingLength:
+                    {
+                        var arr = pp.Property.GetValue(instance) as Array ?? Array.Empty<object>();
+                        if (pp.LengthPrefixBytes == 1)
+                            bytes.Add((byte)arr.Length);
+                        else if (pp.LengthPrefixBytes == 2)
+                            PrimitiveSerializer.WriteUInt16(bytes, (ushort)arr.Length);
+                        foreach (var element in arr)
+                            PrimitiveSerializer.WriteEnum(bytes, pp.TypeCode, element);
+                        break;
+                    }
 
                     case SerializerKind.MultipleMessagePacket:
                         MultipleMessagePacketSerializer.Write(bytes, pp.Property.GetValue(instance) as IMessageData[]);
@@ -205,9 +229,40 @@ namespace DSC.TLink.Serialization
                         break;
                     }
 
+                    case SerializerKind.UnicodeStringArrayUnbounded:
+                        pp.Property.SetValue(instance, StringSerializer.ReadUnicodeStringArrayUnbounded(bytes, ref offset, pp.Property.Name, pp.LengthPrefixBytes));
+                        break;
+
+                    case SerializerKind.FixedLengthUnicodeStringArrayUnbounded:
+                        pp.Property.SetValue(instance, StringSerializer.ReadFixedLengthUnicodeStringArrayUnbounded(bytes, ref offset));
+                        break;
+
                     case SerializerKind.ObjectArrayLeadingLength:
                         pp.Property.SetValue(instance, ObjectArraySerializer.ReadLeadingLength(bytes, ref offset, pp.Property.Name, pp.ElementType!, pp.LengthPrefixBytes));
                         break;
+
+                    case SerializerKind.EnumArrayUnbounded:
+                    {
+                        int elementSize = pp.TypeCode == TypeCode.Byte || pp.TypeCode == TypeCode.SByte ? 1 : 2;
+                        int count = (bytes.Length - offset) / elementSize;
+                        var arr = Array.CreateInstance(pp.EnumType!, count);
+                        for (int i = 0; i < count; i++)
+                            arr.SetValue(PrimitiveSerializer.ReadEnum(bytes, ref offset, pp.EnumType!, pp.TypeCode), i);
+                        pp.Property.SetValue(instance, arr);
+                        break;
+                    }
+
+                    case SerializerKind.EnumArrayLeadingLength:
+                    {
+                        int count = pp.LengthPrefixBytes == 2
+                            ? PrimitiveSerializer.ReadUInt16(bytes, ref offset)
+                            : bytes[offset++];
+                        var arr = Array.CreateInstance(pp.EnumType!, count);
+                        for (int i = 0; i < count; i++)
+                            arr.SetValue(PrimitiveSerializer.ReadEnum(bytes, ref offset, pp.EnumType!, pp.TypeCode), i);
+                        pp.Property.SetValue(instance, arr);
+                        break;
+                    }
 
                     case SerializerKind.DateTime:
                         pp.Property.SetValue(instance, DateTimeSerializer.Read(bytes, ref offset, pp.DateTimeFormat));
@@ -398,6 +453,43 @@ namespace DSC.TLink.Serialization
                     {
                         Property = property,
                         Kind = SerializerKind.ByteArrayUnbounded,
+                    };
+                }
+
+                if (elementType == typeof(string))
+                {
+                    if (property.IsDefined(typeof(FixedLengthUnicodeStringArrayAttribute), false))
+                    {
+                        return new PropertyPlan
+                        {
+                            Property = property,
+                            Kind = SerializerKind.FixedLengthUnicodeStringArrayUnbounded,
+                        };
+                    }
+
+                    var unicodeAttr = property.GetCustomAttribute<UnicodeStringAttribute>()
+                        ?? throw new InvalidOperationException(
+                            $"String array property '{property.Name}' must have [FixedLengthUnicodeStringArray] or [UnicodeString] attribute.");
+
+                    return new PropertyPlan
+                    {
+                        Property = property,
+                        Kind = SerializerKind.UnicodeStringArrayUnbounded,
+                        LengthPrefixBytes = unicodeAttr.LengthBytes,
+                    };
+                }
+
+                if (elementType.IsEnum)
+                {
+                    var underlyingType = Enum.GetUnderlyingType(elementType);
+                    var lengthAttr = property.GetCustomAttribute<LeadingLengthArrayAttribute>();
+                    return new PropertyPlan
+                    {
+                        Property = property,
+                        Kind = lengthAttr != null ? SerializerKind.EnumArrayLeadingLength : SerializerKind.EnumArrayUnbounded,
+                        EnumType = elementType,
+                        TypeCode = Type.GetTypeCode(underlyingType),
+                        LengthPrefixBytes = lengthAttr?.LengthBytes ?? 0,
                     };
                 }
 
