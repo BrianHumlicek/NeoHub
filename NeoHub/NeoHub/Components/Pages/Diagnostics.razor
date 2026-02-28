@@ -162,7 +162,7 @@
     private List<DiagnosticsLogEntry> filteredLogs = new();
     private List<CategoryRow> categoryRows = new();
 
-    private CancellationTokenSource _cts = new();
+    private volatile bool _disposed;
 
     protected override void OnInitialized()
     {
@@ -181,18 +181,23 @@
 
     private void OnLogReceived(DiagnosticsLogEntry entry)
     {
-        InvokeAsync(() =>
+        if (_disposed) return;
+        try
         {
-            if (_cts.IsCancellationRequested) return;
-            allLogs.Add(entry);
+            InvokeAsync(() =>
+            {
+                if (_disposed) return;
+                allLogs.Add(entry);
 
-            // Add new category if discovered
-            if (!categoryRows.Any(r => r.FullName == entry.Category))
-                RefreshCategoryRows();
+                // Add new category if discovered
+                if (!categoryRows.Any(r => r.FullName == entry.Category))
+                    RefreshCategoryRows();
 
-            filteredLogs.Add(entry);
-            StateHasChanged();
-        });
+                filteredLogs.Add(entry);
+                StateHasChanged();
+            });
+        }
+        catch (ObjectDisposedException) { }
     }
 
     #region Settings Changes (all auto-save)
@@ -336,9 +341,8 @@
 
     public void Dispose()
     {
-        _cts.Cancel();
+        _disposed = true;
         LogService.LogReceived -= OnLogReceived;
-        _cts.Dispose();
     }
 
     #endregion

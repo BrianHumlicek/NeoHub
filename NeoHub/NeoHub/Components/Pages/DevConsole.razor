@@ -1,0 +1,514 @@
+@page "/dev-console"
+@using DSC.TLink.ITv2.MediatR
+@using DSC.TLink.ITv2.Messages
+@using DSC.TLink.Extensions
+@using NeoHub.Services
+@using NeoHub.Services.Diagnostics
+@using MediatR
+@using System.Reflection
+@inject IITv2SessionManager SessionManager
+@inject ISessionMonitor SessionMonitor
+@inject IMediator Mediator
+@inject IDiagnosticsLogService LogService
+@inject IJSRuntime JS
+@implements IDisposable
+
+<PageTitle>Dev Console</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
+    <MudText Typo="Typo.h4" GutterBottom="true">Dev Console</MudText>
+
+    @* ── Session + Message Type ── *@
+    <MudPaper Class="pa-4 mb-4">
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="4">
+                <MudSelect T="string"
+                           Label="Session"
+                           @bind-Value="_sessionId"
+                           Variant="Variant.Outlined"
+                           Disabled="@(!_activeSessions.Any())">
+                    @foreach (var id in _activeSessions)
+                    {
+                        <MudSelectItem T="string" Value="@id">@id</MudSelectItem>
+                    }
+                </MudSelect>
+                @if (!_activeSessions.Any())
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Warning">No active sessions</MudText>
+                }
+            </MudItem>
+            <MudItem xs="12" sm="8">
+                <MudAutocomplete T="MessageTypeInfo"
+                                 Label="Message Type"
+                                 Value="_selectedType"
+                                 ValueChanged="OnMessageTypeSelected"
+                                 SearchFunc="SearchMessageTypes"
+                                 ToStringFunc="@(t => t?.DisplayName ?? string.Empty)"
+                                 Variant="Variant.Outlined"
+                                 MinCharacters="0"
+                                 MaxItems="80"
+                                 Clearable="true"
+                                 AdornmentIcon="@Icons.Material.Filled.Search" />
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+
+    @* ── Property Form ── *@
+    @if (_selectedType is not null)
+    {
+        <MudPaper Class="pa-4 mb-4">
+            <MudStack Row="true" AlignItems="AlignItems.Baseline" Spacing="1" Class="mb-3">
+                <MudText Typo="Typo.h6">@_selectedType.DisplayName</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">@_selectedType.MessageType.Name</MudText>
+            </MudStack>
+
+            @if (_editableProperties.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Color="Color.Secondary">No editable properties.</MudText>
+            }
+            else
+            {
+                <MudGrid Spacing="2">
+                    @foreach (var prop in _editableProperties)
+                    {
+                        <MudItem xs="12" sm="6" md="4">
+                            @RenderPropertyEditor(prop)
+                        </MudItem>
+                    }
+                </MudGrid>
+            }
+
+            @if (_buildError is not null)
+            {
+                <MudAlert Severity="Severity.Error" Dense="true" Class="mt-3">@_buildError</MudAlert>
+            }
+
+            <MudStack Row="true" Class="mt-4" Spacing="2">
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Send"
+                           OnClick="SendAsync"
+                           Disabled="@(_isSending || string.IsNullOrEmpty(_sessionId))"
+                           Loading="@_isSending">
+                    Send
+                </MudButton>
+                <MudButton Variant="Variant.Outlined"
+                           StartIcon="@Icons.Material.Filled.Refresh"
+                           OnClick="ResetForm">
+                    Reset
+                </MudButton>
+            </MudStack>
+        </MudPaper>
+    }
+
+    @* ── Response ── *@
+    @if (_response is not null)
+    {
+        <MudPaper Class="pa-4 mb-4">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mb-2">
+                <MudText Typo="Typo.h6">Response</MudText>
+                @if (_response.Success)
+                {
+                    <MudChip T="string" Color="Color.Success" Size="Size.Small">Success</MudChip>
+                }
+                else
+                {
+                    <MudChip T="string" Color="Color.Error" Size="Size.Small">Failed</MudChip>
+                }
+            </MudStack>
+            @if (!_response.Success)
+            {
+                <MudAlert Severity="Severity.Error" Dense="true">
+                    @GetResponseError()
+                </MudAlert>
+            }
+            else if (_response.MessageData is not null)
+            {
+                <MudText Style="font-family: monospace; white-space: pre-wrap; font-size: 0.85em;">@FormatResponse()</MudText>
+            }
+        </MudPaper>
+    }
+
+    @* ── Log Tail ── *@
+    <MudExpansionPanels>
+        <MudExpansionPanel Text="Log">
+            <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Class="mb-2">
+                <MudSwitch T="bool"
+                           Value="_tlinkOnly"
+                           ValueChanged="OnTlinkOnlyChanged"
+                           Label="TLink only"
+                           Color="Color.Secondary" />
+                <MudSwitch T="bool" @bind-Value="_autoScroll" Label="Auto-scroll" Color="Color.Primary" />
+                <MudSpacer />
+                <MudButton Variant="Variant.Text"
+                           Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.Clear"
+                           OnClick="ClearLog">
+                    Clear
+                </MudButton>
+            </MudStack>
+            <div style="height: 300px; overflow-y: auto;" id="dev-log-container">
+                <MudSimpleTable Dense="true" Hover="false" Elevation="0" Style="font-size: 0.82em;">
+                    <tbody>
+                        @foreach (var entry in FilteredLogEntries)
+                        {
+                            <tr>
+                                <td style="white-space: nowrap; padding: 1px 4px; color: #888;">@entry.Timestamp.ToLocalTime().ToString("HH:mm:ss.fff")</td>
+                                <td style="white-space: nowrap; padding: 1px 4px;">
+                                    <MudChip T="string" Size="Size.Small" Color="@GetLogLevelColor(entry.LogLevel)" Style="height:16px;padding:0 4px;font-size:0.78em;min-width:0;">
+                                        @entry.LogLevel.ToString()[..3]
+                                    </MudChip>
+                                </td>
+                                <td style="white-space: nowrap; padding: 1px 4px; color: #999;">@GetShortCategory(entry.Category)</td>
+                                <td style="font-family: monospace; padding: 1px 4px; white-space: pre-wrap;">@entry.Message</td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            </div>
+            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">
+                @FilteredLogEntries.Count() entries shown
+            </MudText>
+        </MudExpansionPanel>
+    </MudExpansionPanels>
+</MudContainer>
+
+@code {
+    private List<string> _activeSessions = new();
+    private string? _sessionId;
+    private MessageTypeInfo? _selectedType;
+    private IReadOnlyList<PropertyInfo> _editableProperties = [];
+    private Dictionary<string, string> _stringValues = new();
+    private Dictionary<string, bool> _boolValues = new();
+    private string? _buildError;
+    private bool _isSending;
+    private SessionResponse? _response;
+
+    private readonly List<DiagnosticsLogEntry> _rawLogEntries = new(300);
+    private bool _tlinkOnly = true;
+    private bool _autoScroll = true;
+
+    private static readonly IReadOnlyList<MessageTypeInfo> _catalog = MessageCatalog.GetSendable();
+
+    protected override void OnInitialized()
+    {
+        RefreshSessions();
+        SessionMonitor.SessionsChanged += OnSessionsChanged;
+        LogService.LogReceived += OnLogReceived;
+
+        foreach (var entry in LogService.GetLogs().TakeLast(200))
+            _rawLogEntries.Add(entry);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_autoScroll)
+            await JS.InvokeVoidAsync("scrollToBottom", "dev-log-container");
+    }
+
+    private void RefreshSessions()
+    {
+        _activeSessions = SessionManager.GetActiveSessions().ToList();
+        if (_sessionId is null || !_activeSessions.Contains(_sessionId))
+            _sessionId = _activeSessions.FirstOrDefault();
+    }
+
+    private void OnSessionsChanged()
+    {
+        InvokeAsync(() =>
+        {
+            RefreshSessions();
+            StateHasChanged();
+        });
+    }
+
+    private void OnLogReceived(DiagnosticsLogEntry entry)
+    {
+        InvokeAsync(() =>
+        {
+            _rawLogEntries.Add(entry);
+            if (_rawLogEntries.Count > 300)
+                _rawLogEntries.RemoveAt(0);
+            StateHasChanged();
+        });
+    }
+
+    private void OnTlinkOnlyChanged(bool value)
+    {
+        _tlinkOnly = value;
+        _rawLogEntries.Clear();
+        foreach (var entry in LogService.GetLogs().TakeLast(200))
+            _rawLogEntries.Add(entry);
+    }
+
+    private IEnumerable<DiagnosticsLogEntry> FilteredLogEntries =>
+        _tlinkOnly
+            ? _rawLogEntries.Where(e => e.Category.StartsWith("DSC.TLink", StringComparison.OrdinalIgnoreCase))
+            : _rawLogEntries;
+
+    private Task<IEnumerable<MessageTypeInfo>> SearchMessageTypes(string text, CancellationToken ct)
+    {
+        var results = string.IsNullOrWhiteSpace(text)
+            ? (IEnumerable<MessageTypeInfo>)_catalog
+            : _catalog.Where(m => m.DisplayName.Contains(text, StringComparison.OrdinalIgnoreCase));
+        return Task.FromResult(results);
+    }
+
+    private void OnMessageTypeSelected(MessageTypeInfo? info)
+    {
+        _selectedType = info;
+        _editableProperties = info is null
+            ? []
+            : MessageCatalog.GetEditableProperties(info.MessageType);
+
+        _stringValues.Clear();
+        _boolValues.Clear();
+        _buildError = null;
+        _response = null;
+
+        foreach (var prop in _editableProperties)
+        {
+            if (prop.PropertyType == typeof(bool))
+                _boolValues[prop.Name] = false;
+            else
+                _stringValues[prop.Name] = GetDefaultStringValue(prop);
+        }
+    }
+
+    private static string GetDefaultStringValue(PropertyInfo prop)
+    {
+        if (prop.PropertyType.IsEnum)
+            return Enum.GetNames(prop.PropertyType).FirstOrDefault() ?? string.Empty;
+        if (prop.PropertyType == typeof(string) || prop.PropertyType == typeof(byte[]))
+            return string.Empty;
+        return "0";
+    }
+
+    // Build a RenderFragment per property to keep the foreach loop body clean.
+    private RenderFragment RenderPropertyEditor(PropertyInfo prop) => builder =>
+    {
+        var name = prop.Name;
+
+        if (prop.PropertyType == typeof(bool))
+        {
+            builder.OpenComponent<MudCheckBox<bool>>(0);
+            builder.AddAttribute(1, "Label", name);
+            builder.AddAttribute(2, "Value", _boolValues.GetValueOrDefault(name));
+            builder.AddAttribute(3, "ValueChanged", EventCallback.Factory.Create<bool>(this, v => { _boolValues[name] = v; StateHasChanged(); }));
+            builder.AddAttribute(4, "Color", Color.Primary);
+            builder.CloseComponent();
+        }
+        else if (prop.PropertyType.IsEnum)
+        {
+            builder.OpenComponent<MudSelect<string>>(0);
+            builder.AddAttribute(1, "Label", name);
+            builder.AddAttribute(2, "Value", _stringValues.GetValueOrDefault(name, string.Empty));
+            builder.AddAttribute(3, "ValueChanged", EventCallback.Factory.Create<string>(this, v => { _stringValues[name] = v; StateHasChanged(); }));
+            builder.AddAttribute(4, "Variant", Variant.Outlined);
+            builder.AddAttribute(5, "Dense", true);
+            builder.AddAttribute(6, "ChildContent", (RenderFragment)(b =>
+            {
+                var i = 0;
+                foreach (var enumName in Enum.GetNames(prop.PropertyType))
+                {
+                    b.OpenComponent<MudSelectItem<string>>(i++);
+                    b.AddAttribute(0, "Value", enumName);
+                    b.AddContent(1, enumName);
+                    b.CloseComponent();
+                }
+            }));
+            builder.CloseComponent();
+        }
+        else if (IsComplexType(prop.PropertyType))
+        {
+            builder.OpenComponent<MudTextField<string>>(0);
+            builder.AddAttribute(1, "Label", name);
+            builder.AddAttribute(2, "Value", "(complex type)");
+            builder.AddAttribute(3, "Variant", Variant.Outlined);
+            builder.AddAttribute(4, "Dense", true);
+            builder.AddAttribute(5, "Disabled", true);
+            builder.CloseComponent();
+        }
+        else
+        {
+            var helperText = prop.PropertyType == typeof(byte[]) ? "Space-separated hex bytes" : null;
+            var placeholder = prop.PropertyType == typeof(byte[]) ? "01 FF 3A" : null;
+            var label = prop.PropertyType == typeof(byte[]) || prop.PropertyType == typeof(string)
+                ? name
+                : $"{name} ({GetTypeLabel(prop.PropertyType)})";
+
+            builder.OpenComponent<MudTextField<string>>(0);
+            builder.AddAttribute(1, "Label", label);
+            builder.AddAttribute(2, "Value", _stringValues.GetValueOrDefault(name, string.Empty));
+            builder.AddAttribute(3, "ValueChanged", EventCallback.Factory.Create<string>(this, v => { _stringValues[name] = v; StateHasChanged(); }));
+            builder.AddAttribute(4, "Variant", Variant.Outlined);
+            builder.AddAttribute(5, "Dense", true);
+            if (helperText is not null) builder.AddAttribute(6, "HelperText", helperText);
+            if (placeholder is not null) builder.AddAttribute(7, "Placeholder", placeholder);
+            builder.CloseComponent();
+        }
+    };
+
+    private async Task SendAsync()
+    {
+        _buildError = null;
+        _response = null;
+        _isSending = true;
+        StateHasChanged();
+
+        try
+        {
+            var message = BuildMessage();
+            if (message is not null && _sessionId is not null)
+            {
+                _response = await Mediator.Send(new SessionCommand
+                {
+                    SessionID = _sessionId,
+                    MessageData = message
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            _buildError = $"Send failed: {ex.Message}";
+        }
+        finally
+        {
+            _isSending = false;
+            StateHasChanged();
+        }
+    }
+
+    private IMessageData? BuildMessage()
+    {
+        if (_selectedType is null) return null;
+
+        object? instance;
+        try
+        {
+            instance = Activator.CreateInstance(_selectedType.MessageType);
+        }
+        catch (Exception ex)
+        {
+            _buildError = $"Cannot instantiate {_selectedType.MessageType.Name}: {ex.Message}";
+            return null;
+        }
+
+        foreach (var prop in _editableProperties)
+        {
+            if (IsComplexType(prop.PropertyType)) continue;
+
+            try
+            {
+                prop.SetValue(instance, ConvertValue(prop));
+            }
+            catch (Exception ex)
+            {
+                _buildError = $"{prop.Name}: {ex.Message}";
+                return null;
+            }
+        }
+
+        return (IMessageData)instance!;
+    }
+
+    private object? ConvertValue(PropertyInfo prop)
+    {
+        var type = prop.PropertyType;
+        var underlying = Nullable.GetUnderlyingType(type);
+        var targetType = underlying ?? type;
+
+        if (type == typeof(bool))
+            return _boolValues.GetValueOrDefault(prop.Name);
+
+        _stringValues.TryGetValue(prop.Name, out var str);
+        str ??= string.Empty;
+
+        if (underlying is not null && string.IsNullOrWhiteSpace(str)) return null;
+        if (targetType == typeof(string)) return str;
+        if (targetType == typeof(byte[])) return ParseHex(str);
+        if (targetType.IsEnum) return Enum.Parse(targetType, str);
+        if (string.IsNullOrWhiteSpace(str)) return Activator.CreateInstance(targetType);
+
+        return Type.GetTypeCode(targetType) switch
+        {
+            TypeCode.Byte     => byte.Parse(str),
+            TypeCode.SByte    => sbyte.Parse(str),
+            TypeCode.Int16    => short.Parse(str),
+            TypeCode.UInt16   => ushort.Parse(str),
+            TypeCode.Int32    => int.Parse(str),
+            TypeCode.UInt32   => uint.Parse(str),
+            TypeCode.Int64    => long.Parse(str),
+            TypeCode.UInt64   => ulong.Parse(str),
+            TypeCode.Single   => float.Parse(str),
+            TypeCode.Double   => double.Parse(str),
+            TypeCode.DateTime => DateTime.Parse(str),
+            _                 => Convert.ChangeType(str, targetType)
+        };
+    }
+
+    private static byte[] ParseHex(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return [];
+        return input.Split(new[] { ' ', ',' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(s =>
+            {
+                var token = s.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? s[2..] : s;
+                return Convert.ToByte(token, 16);
+            })
+            .ToArray();
+    }
+
+    private void ResetForm() => OnMessageTypeSelected(_selectedType);
+
+    private void ClearLog() => _rawLogEntries.Clear();
+
+    private string GetResponseError()
+    {
+        if (_response is null) return string.Empty;
+        var code = _response.ErrorCode.HasValue ? $"[{_response.ErrorCode}] " : string.Empty;
+        return $"{code}{_response.ErrorMessage}";
+    }
+
+    private string FormatResponse()
+    {
+        if (_response?.MessageData is null) return string.Empty;
+        return new MessageLog(_response.MessageData).ToString();
+    }
+
+    private static bool IsComplexType(Type t) =>
+        t.IsClass && t != typeof(string) && t != typeof(byte[]);
+
+    private static string GetTypeLabel(Type t) => Type.GetTypeCode(t) switch
+    {
+        TypeCode.Byte     => "byte",
+        TypeCode.Int16    => "short",
+        TypeCode.UInt16   => "ushort",
+        TypeCode.Int32    => "int",
+        TypeCode.Int64    => "long",
+        TypeCode.Single   => "float",
+        TypeCode.Double   => "double",
+        TypeCode.DateTime => "datetime",
+        _                 => t.Name
+    };
+
+    private static Color GetLogLevelColor(LogLevel level) => level switch
+    {
+        LogLevel.Error or LogLevel.Critical => Color.Error,
+        LogLevel.Warning => Color.Warning,
+        LogLevel.Information => Color.Info,
+        _ => Color.Default
+    };
+
+    private static string GetShortCategory(string category)
+    {
+        var parts = category.Split('.');
+        return parts.Length > 2 ? string.Join(".", parts[^2..]) : category;
+    }
+
+    public void Dispose()
+    {
+        SessionMonitor.SessionsChanged -= OnSessionsChanged;
+        LogService.LogReceived -= OnLogReceived;
+    }
+}
