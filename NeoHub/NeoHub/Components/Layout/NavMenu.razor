@@ -1,4 +1,4 @@
-ï»¿@inject NavigationManager Navigation
+@inject NavigationManager Navigation
 
 <div class="top-row ps-3 navbar navbar-dark">
     <div class="container-fluid">
@@ -23,8 +23,8 @@
         </div>
     </nav>
     <div class="nav-version" onclick="event.stopPropagation()">
-        <div>GitHub @BuildInfo.GitCommit</div>
-        <div>@BuildInfo.BuildTimeUtc.ToString("yyyy-MM-dd HH:mm") UTC Â· @BuildAge</div>
+        <div>GitHub @BuildInfo.GitCommit · Build @BuildInfo.BuildNumber</div>
+        <div>@BuildInfo.BuildTimeUtc.ToString("yyyy-MM-dd HH:mm") UTC · @BuildAge</div>
     </div>
 </div>
 
@@ -40,4 +40,5 @@
         }
     }
 }
+
 
