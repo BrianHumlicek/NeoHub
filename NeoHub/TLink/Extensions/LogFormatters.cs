@@ -141,13 +141,13 @@ public readonly struct MessageLog
     private static string FormatValue(object? value, int indentLevel) => value switch
     {
         null => "null",
+        Array array when array.GetType().GetElementType()?.IsEnum == true => FormatEnumArray(array, indentLevel),
         byte[] bytes when bytes.Length > 8 => new HexGrid(bytes).ToString(),
         byte[] bytes => new HexBytes(bytes).ToString(),
         IEnumerable<byte> bytes => new HexBytes(bytes.ToArray()).ToString(),
         string str => $"\"{str}\"",
         string[] strs => FormatStringArray(strs, indentLevel),
         IMessageData[] messages => FormatMessageArray(messages, indentLevel),
-        Array array when array.GetType().GetElementType()?.IsEnum == true => FormatEnumArray(array, indentLevel),
         Array array when IsComplexArray(array) => FormatObjectArray(array, indentLevel),
         _ => value.ToString() ?? "null"
     };

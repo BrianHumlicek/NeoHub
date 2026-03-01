@@ -17,6 +17,7 @@ namespace DSC.TLink.ITv2.Messages
         [Flags]
         public enum ZoneStatusEnum : byte
         {
+            Secure = 0x00,
             Open = 0x01,
             Tamper = 0x02,
             Fault = 0x04,
