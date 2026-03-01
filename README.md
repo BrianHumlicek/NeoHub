@@ -211,6 +211,27 @@ Program the following tags in section **[851]** for your chosen integration slot
 
 > ⚠️ **Critical:** The values programmed in the panel **must exactly match** the values in your `userSettings.json` file.
 
+**🔧Firmware v4.1 configuration🔧**
+- After testing this seems to be all the settings that needs to be configured 
+- This version is still under some testing stages.
+
+  - `[851][001]` Panel Static IP address
+  - `[851][002]` Panel Subnet mask
+  - `[851][003]` Panel Gateway
+  - `[851][651]` Panel Integration ID
+  - `[851][652]` Access code (12345678) *default*
+  - `[851][664]` keep only option 3 on
+  - `[851][651]` NeoHub server address
+  - `[851][697]` Clear DNS name (Optional)
+  - `[851][999]` 55 (restart)
+
+**NeoHub settings**
+  - Only **Type 1 access code** is needed *([851][652]])*.
+  - Integration ID
+  - Server port
+
+*end of v4.1 configuration*
+
 ---
 
 ## 🏗️ Architecture
