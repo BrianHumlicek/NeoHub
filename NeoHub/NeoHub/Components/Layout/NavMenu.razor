@@ -23,12 +23,13 @@
         </div>
     </nav>
     <div class="nav-version" onclick="event.stopPropagation()">
-        <div>GitHub @BuildInfo.GitCommit · Build @BuildInfo.BuildNumber</div>
+		<div>GitHub @GithubShortHash · Build @BuildInfo.BuildNumber</div>
         <div>@BuildInfo.BuildTimeUtc.ToString("yyyy-MM-dd HH:mm") UTC · @BuildAge</div>
     </div>
 </div>
 
 @code {
+	private static string GithubShortHash => BuildInfo.GitCommit.Substring(0, 7);
     private static string BuildAge
     {
         get

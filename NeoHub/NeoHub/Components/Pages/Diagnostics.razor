@@ -286,7 +286,7 @@
             sb.AppendLine();
         }
 
-        var fileName = $"NeoHub-logs-{DateTime.Now:yyyyMMdd-HHmmss}.txt";
+        var fileName = $"NeoHub-logs-build-{BuildInfo.BuildNumber}-{DateTime.Now:yyyyMMdd-HHmmss}.txt";
         var bytes = Encoding.UTF8.GetBytes(sb.ToString());
         var base64 = Convert.ToBase64String(bytes);
         await JS.InvokeVoidAsync("downloadFile", fileName, base64);

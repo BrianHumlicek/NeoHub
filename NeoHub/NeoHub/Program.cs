@@ -74,6 +74,8 @@ namespace NeoHub
 
             var app = builder.Build();
 
+            var logger = app.Services.GetRequiredService<ILogger<Program>>();
+            logger.LogInformation("NeoHub build {buildNumber} GitHub hash {hash} build datetime UTC {buildDateTime}", BuildInfo.BuildNumber, BuildInfo.GitCommit,  BuildInfo.BuildTimeUtc);
             // Force initialization
             app.Services.GetRequiredService<ISettingsDiscoveryService>();
 
