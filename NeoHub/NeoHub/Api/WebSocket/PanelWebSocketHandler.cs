@@ -258,8 +258,8 @@ namespace NeoHub.Api.WebSocket
                 return;
             }
 
-            // Serialize using message.GetType() so derived properties are included
-            var json = JsonSerializer.Serialize(message, message.GetType(), _jsonOptions);
+            // Serialize as the base type so the [JsonPolymorphic] discriminator is emitted
+            var json = JsonSerializer.Serialize<WebSocketMessage>(message, _jsonOptions);
 
             _logger.LogTrace("Client {ClientId} → {MessageType}: {Json}", clientId, message.GetType().Name, json);
 
