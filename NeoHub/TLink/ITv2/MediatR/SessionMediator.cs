@@ -1,7 +1,4 @@
-﻿using DSC.TLink.Extensions;
-using DSC.TLink.ITv2.Enumerations;
-using DSC.TLink.ITv2.Messages;
-using DSC.TLink.ITv2.Transactions;
+﻿using DSC.TLink.ITv2.Messages;
 using MediatR;
 using Microsoft.Extensions.Logging;
 
@@ -30,9 +27,6 @@ namespace DSC.TLink.ITv2.MediatR
 
         #region Command Handling (Outbound from Blazor UI)
 
-        /// <summary>
-        /// Handles commands from Blazor UI by routing to the appropriate session.
-        /// </summary>
         public async Task<SessionResponse> Handle(
             SessionCommand request,
             CancellationToken cancellationToken)
@@ -44,23 +38,29 @@ namespace DSC.TLink.ITv2.MediatR
                 return new SessionResponse
                 {
                     Success = false,
+                    ErrorCode = TLinkErrorCode.SessionNotFound,
                     ErrorMessage = $"Session {request.SessionID} not found"
                 };
             }
 
             try
             {
-                var result = await session.SendMessageAsync(request.MessageData, cancellationToken);
+                var result = await session.SendAsync(request.MessageData, cancellationToken);
+
+                if (result.IsFailure)
+                {
+                    return new SessionResponse
+                    {
+                        Success = false,
+                        ErrorCode = result.Error!.Value.Code,
+                        ErrorMessage = result.Error.Value.Message
+                    };
+                }
+
                 return new SessionResponse
                 {
-                    Success = result.Success,
-                    MessageData = result.MessageData,
-                    ErrorMessage = result.ErrorMessage,
-                    ErrorDetail = result.MessageData switch
-                    {
-                        CommandResponse cmdresp => $"Command Response Code: {cmdresp.ResponseCode.Description()}",
-                        _ => null
-                    }
+                    Success = true,
+                    MessageData = result.Value
                 };
             }
             catch (Exception ex)
@@ -79,69 +79,35 @@ namespace DSC.TLink.ITv2.MediatR
         #region Notification Publishing (Inbound from Panel)
 
         /// <summary>
-        /// Publishes inbound transaction results as generic SessionNotification&lt;T&gt;.
-        /// Called by ITv2Session for each received message.
+        /// Publishes an inbound message as a typed SessionNotification&lt;T&gt;.
+        /// Called by the connection handler for each notification from the session.
+        /// MultipleMessagePacket expansion is already handled by the session.
         /// </summary>
-        /// <param name="sessionId">The session ID that received the message</param>
-        /// <param name="transactionResultTask">The transaction result task</param>
-        public async void PublishInboundMessage(string sessionId, Task<TransactionResult> transactionResultTask)
+        public async Task PublishNotificationAsync(string sessionId, IMessageData message)
         {
             try
             {
-                var result = await transactionResultTask;
+                var messageType = message.GetType();
+                var notificationType = typeof(SessionNotification<>).MakeGenericType(messageType);
 
-                if (!result.Success)
+                var notification = Activator.CreateInstance(
+                    notificationType, sessionId, message, DateTime.UtcNow);
+
+                if (notification == null)
                 {
-                    _logger.LogWarning("Transaction failed for session {SessionId}: {Error}",
-                        sessionId, result.ErrorMessage);
+                    _logger.LogError("Failed to create notification for type {MessageType}", messageType.Name);
                     return;
                 }
 
-                if (result.MessageData is MultipleMessagePacket multiMessage)
-                {
-                    _logger.LogTrace("Received multi message packet with {Count} messages for session {SessionId}",
-                        multiMessage.Messages.Length, sessionId);
+                await _mediator.Publish(notification);
 
-                    foreach (var messageData in multiMessage.Messages)
-                    {
-                        await PublishGenericNotification(sessionId, messageData);
-                        _logger.LogTrace("MULTI PART: Published SessionNotification<{MessageType}> for session {SessionId}",
-                            messageData.GetType().Name, sessionId);
-                    }
-                    return;
-                }
-
-                await PublishGenericNotification(sessionId, result.MessageData);
                 _logger.LogTrace("Published SessionNotification<{MessageType}> for session {SessionId}",
-                        result.MessageData.GetType().Name, sessionId);
+                    messageType.Name, sessionId);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error publishing notification for session {SessionId}", sessionId);
             }
-        }
-
-        private async Task PublishGenericNotification(string sessionId, IMessageData messageData)
-        {
-            // Use reflection to create SessionNotification<T> with the concrete message type
-            var messageType = messageData.GetType();
-            var notificationType = typeof(SessionNotification<>).MakeGenericType(messageType);
-
-            // Create the notification instance
-            var notification = Activator.CreateInstance(
-                notificationType,
-                sessionId,
-                messageData,
-                DateTime.UtcNow);
-
-            if (notification == null)
-            {
-                _logger.LogError("Failed to create notification for type {MessageType}", messageType.Name);
-                return;
-            }
-
-            // Publish it through MediatR
-            await _mediator.Publish(notification);
         }
 
         #endregion

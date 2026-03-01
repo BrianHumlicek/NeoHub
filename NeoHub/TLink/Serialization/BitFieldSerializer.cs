@@ -14,75 +14,45 @@ namespace DSC.TLink.Serialization
     /// Handles serialization of properties marked with [BitField] attributes.
     /// Multiple properties with the same group name are packed into a single byte/ushort/uint.
     /// </summary>
-    internal class BitFieldSerializer : ITypeSerializer
+    internal static class BitFieldSerializer
     {
-        public bool CanHandle(PropertyInfo property)
-        {
-            return property.IsDefined(typeof(BitFieldAttribute), false);
-        }
-
-        public void Write(List<byte> bytes, PropertyInfo property, object? value)
-        {
-            throw new InvalidOperationException(
-                "BitField properties must be written as a group. Use WriteBitFieldGroup instead.");
-        }
-
-        public object Read(ReadOnlySpan<byte> bytes, ref int offset, PropertyInfo property, int remainingBytes)
-        {
-            throw new InvalidOperationException(
-                "BitField properties must be read as a group. Use ReadBitFieldGroup instead.");
-        }
-
         /// <summary>
         /// Write a group of bit field properties that share the same group name.
         /// </summary>
-        public static void WriteBitFieldGroup(List<byte> bytes, PropertyInfo[] properties, object instance)
+        public static void WriteBitFieldGroup(List<byte> bytes, BitFieldGroupPlan group, object instance)
         {
-            if (properties.Length == 0) return;
-
-            var attr = properties[0].GetCustomAttribute<BitFieldAttribute>()!;
             uint packedValue = 0;
 
-            foreach (var prop in properties)
+            foreach (var member in group.Members)
             {
-                var fieldAttr = prop.GetCustomAttribute<BitFieldAttribute>()!;
-                var value = prop.GetValue(instance);
+                var value = member.Property.GetValue(instance);
 
-                int fieldValue = fieldAttr.IsBool
+                int fieldValue = member.IsBool
                     ? (bool)value! ? 1 : 0
                     : Convert.ToInt32(value);
 
-                // Use extension method to insert bits
-                packedValue = packedValue.InsertBits(fieldValue, fieldAttr.BitPosition, fieldAttr.BitWidth);
+                packedValue = packedValue.InsertBits(fieldValue, member.BitPosition, member.BitWidth);
             }
 
-            // Write packed value based on storage size
-            WritePackedValue(bytes, packedValue, attr.StorageSize);
+            WritePackedValue(bytes, packedValue, group.StorageSize);
         }
 
         /// <summary>
         /// Read a group of bit field properties that share the same group name.
         /// </summary>
-        public static void ReadBitFieldGroup(ReadOnlySpan<byte> bytes, ref int offset, PropertyInfo[] properties, object instance)
+        public static void ReadBitFieldGroup(ReadOnlySpan<byte> bytes, ref int offset, BitFieldGroupPlan group, object instance)
         {
-            if (properties.Length == 0) return;
+            uint packedValue = ReadPackedValue(bytes, ref offset, group.StorageSize);
 
-            var attr = properties[0].GetCustomAttribute<BitFieldAttribute>()!;
-            uint packedValue = ReadPackedValue(bytes, ref offset, attr.StorageSize);
-
-            foreach (var prop in properties)
+            foreach (var member in group.Members)
             {
-                var fieldAttr = prop.GetCustomAttribute<BitFieldAttribute>()!;
+                int fieldValue = packedValue.ExtractBits(member.BitPosition, member.BitWidth);
 
-                // Use extension method to extract bits
-                int fieldValue = packedValue.ExtractBits(fieldAttr.BitPosition, fieldAttr.BitWidth);
-
-                // Convert to property type
-                object value = fieldAttr.IsBool
+                object value = member.IsBool
                     ? fieldValue != 0
-                    : Convert.ChangeType(fieldValue, prop.PropertyType);
+                    : Convert.ChangeType(fieldValue, member.Property.PropertyType);
 
-                prop.SetValue(instance, value);
+                member.Property.SetValue(instance, value);
             }
         }
 

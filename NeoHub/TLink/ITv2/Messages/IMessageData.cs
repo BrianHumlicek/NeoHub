@@ -13,14 +13,8 @@ namespace DSC.TLink.ITv2.Messages
         /// Default implementation delegates to MessageFactory.
         /// Override only if custom serialization logic is required.
         /// </summary>
-        internal List<byte> Serialize(byte? appSequence)
-        {
-            return MessageFactory.SerializeMessage(appSequence, this);
-        }
-
+        internal List<byte> Serialize() => MessageFactory.SerializeMessage(this);
         internal ITv2Command Command => MessageFactory.GetCommand(this);
-        internal bool IsAppSequence => MessageFactory.IsAppSequence(Command);
-        internal bool IsPublicMessage => MessageFactory.IsPublicMessage(Command);
         internal T As<T>() where T : IMessageData
         {
             if (this is T typedMessage)

@@ -14,10 +14,6 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-using DSC.TLink.ITv2.Enumerations;
-using DSC.TLink.ITv2.Transactions;
-using DSC.TLink.Serialization;
-
 namespace DSC.TLink.ITv2.Messages
 {
     internal record SimpleAck : IMessageData

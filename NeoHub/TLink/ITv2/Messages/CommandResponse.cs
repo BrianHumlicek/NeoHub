@@ -13,17 +13,12 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
 using DSC.TLink.ITv2.Enumerations;
-using DSC.TLink.ITv2.Transactions;
-using DSC.TLink.Serialization;
-
 
 namespace DSC.TLink.ITv2.Messages
 {
-	[ITv2Command(ITv2Command.Command_Response, isAppSequence: true)]
-    [SimpleAckTransaction]
-	internal record CommandResponse : IMessageData
+	[ITv2Command(ITv2Command.Command_Response)]
+	internal record CommandResponse : CommandMessageBase
 	{
         public CommandResponseCode ResponseCode { get; init; }
 	}

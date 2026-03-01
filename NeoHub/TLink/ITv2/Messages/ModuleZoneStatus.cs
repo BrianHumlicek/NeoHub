@@ -1,12 +1,10 @@
 ﻿using DSC.TLink.ITv2.Enumerations;
-using DSC.TLink.ITv2.Transactions;
 using DSC.TLink.Serialization;
 
 
 namespace DSC.TLink.ITv2.Messages
 {
     [ITv2Command(ITv2Command.ModuleStatus_Zone_Status)]
-    [SimpleAckTransaction]
     public record ModuleZoneStatus : IMessageData
     {
         [CompactInteger]
@@ -14,7 +12,7 @@ namespace DSC.TLink.ITv2.Messages
         [CompactInteger]
         public int ZoneCount { get; init; }
         public byte StatusSizeInBytes { get; init; }    //I think this should always be 1
-        public byte[] ZoneStatusBytes { get; init; } = Array.Empty<byte>();
+        public ZoneStatusEnum[] ZoneStatusBytes { get; init; } = Array.Empty<ZoneStatusEnum>();
 
         [Flags]
         public enum ZoneStatusEnum : byte

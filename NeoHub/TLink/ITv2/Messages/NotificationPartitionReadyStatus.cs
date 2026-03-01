@@ -1,14 +1,10 @@
 ﻿using DSC.TLink.ITv2.Enumerations;
-using DSC.TLink.ITv2.Transactions;
 using DSC.TLink.Serialization;
-using MediatR;
-
 
 namespace DSC.TLink.ITv2.Messages
 {
-    [ITv2Command(Enumerations.ITv2Command.Notification_Partition_Ready_Status)]
-    [SimpleAckTransaction]
-    public record NotificationPartitionReadyStatus : IMessageData, INotification
+    [ITv2Command(ITv2Command.Notification_Partition_Ready_Status)]
+    public record NotificationPartitionReadyStatus : IMessageData
     {
         [CompactInteger]
         public byte PartitionNumber { get; init; }

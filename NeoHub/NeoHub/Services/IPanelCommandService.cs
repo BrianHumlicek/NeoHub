@@ -1,3 +1,4 @@
+using DSC.TLink;
 using DSC.TLink.ITv2.Enumerations;
 
 namespace NeoHub.Services
@@ -15,9 +16,19 @@ namespace NeoHub.Services
     public record PanelCommandResult
     {
         public bool Success { get; init; }
+
+        /// <summary>Infrastructure error code. Null when the panel itself rejected the command.</summary>
+        public TLinkErrorCode? ErrorCode { get; init; }
+
+        /// <summary>Human-readable error detail. Set for both infrastructure and panel-level failures.</summary>
         public string? ErrorMessage { get; init; }
 
         public static PanelCommandResult Ok() => new() { Success = true };
-        public static PanelCommandResult Error(string message) => new() { Success = false, ErrorMessage = message };
+
+        public static PanelCommandResult Error(TLinkErrorCode code, string message) =>
+            new() { Success = false, ErrorCode = code, ErrorMessage = message };
+
+        public static PanelCommandResult Error(string message) =>
+            new() { Success = false, ErrorMessage = message };
     }
 }
