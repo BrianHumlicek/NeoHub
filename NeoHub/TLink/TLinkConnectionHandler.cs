@@ -41,43 +41,38 @@ namespace DSC.TLink
 
             try
             {
-                // Create a new scope per connection
-                await using var scope = _serviceProvider.CreateAsyncScope();
+                var settings = _serviceProvider.GetRequiredService<ITv2Settings>();
+                var loggerFactory = _serviceProvider.GetRequiredService<ILoggerFactory>();
+                var sessionMediator = _serviceProvider.GetRequiredService<SessionMediator>();
+                var sessionManager = _serviceProvider.GetRequiredService<IITv2SessionManager>();
 
-                // Get scoped instances
-                var session = scope.ServiceProvider.GetRequiredService<ITv2Session>();
-                
-                // Get singleton instances
-                var sessionMediator = scope.ServiceProvider.GetRequiredService<SessionMediator>();
-                var sessionManager = scope.ServiceProvider.GetRequiredService<IITv2SessionManager>();
+                var result = await ITv2Session.CreateAsync(
+                    connection.Transport, settings, loggerFactory, connection.ConnectionClosed);
 
-                // Initialize the session
-                var sessionConnected = await session.InitializeSession(connection.Transport, connection.ConnectionClosed);
-
-                if (!sessionConnected)
+                if (result.IsFailure)
                 {
-                    _log.LogError("Session failed to properly initialize.  Closing connection.");
+                    _log.LogError("Session failed to initialize: {Error}", result.Error);
                     return;
                 }
 
-                // Register session for command routing
-                sessionManager.RegisterSession(session.SessionID, session);
+                await using var session = result.Value;
 
+                sessionManager.RegisterSession(session.SessionId, session);
                 try
                 {
-                    // Create a closure that captures sessionId for publishing
-                    var sessionId = session.SessionID;
-                    
-                    // Listen for messages and publish notifications
-                    await session.ListenAsync(
-                        transactionResult => sessionMediator.PublishInboundMessage(sessionId, transactionResult),
-                        connection.ConnectionClosed);
+                    await foreach (var message in session.GetNotificationsAsync(connection.ConnectionClosed))
+                    {
+                        await sessionMediator.PublishNotificationAsync(session.SessionId, message);
+                    }
                 }
                 finally
                 {
-                    // Cleanup: unregister session
-                    sessionManager.UnregisterSession(session.SessionID);
+                    sessionManager.UnregisterSession(session.SessionId);
                 }
+            }
+            catch (OperationCanceledException) when (connection.ConnectionClosed.IsCancellationRequested)
+            {
+                _log.LogInformation("Connection cancelled");
             }
             catch (Exception ex)
             {

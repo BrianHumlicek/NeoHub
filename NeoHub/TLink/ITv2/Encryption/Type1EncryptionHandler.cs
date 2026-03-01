@@ -84,7 +84,7 @@ namespace DSC.TLink.ITv2.Encryption
 			byte[] plainText = decryptKeyData(_integrationIdentificationNumber, cipherText);
 
 			if (!checkBytes.SequenceEqual(EvenIndexes(plainText)))
-				throw new TLinkPacketException(TLinkPacketException.Code.Unknown, "Encryption initializer check byte failure.");
+				throw new InvalidOperationException("Encryption initializer check byte failure.");
 
 			byte[] outboundKey = OddIndexes(plainText).ToArray();
 

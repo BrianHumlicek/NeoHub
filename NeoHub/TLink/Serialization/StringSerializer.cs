@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-using System.Reflection;
 using System.Text;
 
 namespace DSC.TLink.Serialization
@@ -25,117 +24,110 @@ namespace DSC.TLink.Serialization
     /// - [BCDString]: BCD encoded digit string, fixed length or unbounded
     /// - [LeadingLengthBCDString]: BCD encoded digit string with a 1-byte length prefix
     /// </summary>
-    internal class StringSerializer : ITypeSerializer
+    internal static class StringSerializer
     {
-        public bool CanHandle(PropertyInfo property)
+        internal static void WriteFixedLengthUnicodeStringArray(List<byte> bytes, string[]? strings)
         {
-            return property.PropertyType == typeof(string)
-                && (property.IsDefined(typeof(UnicodeStringAttribute), false)
-                 || property.IsDefined(typeof(BCDStringAttribute), false)
-                 || property.IsDefined(typeof(LeadingLengthBCDStringAttribute), false));
-        }
+            strings ??= Array.Empty<string>();
 
-        public void Write(List<byte> bytes, PropertyInfo property, object? value)
-        {
-            var str = (string?)value ?? string.Empty;
+            // Determine the fixed element byte width from the widest string
+            int fixedLen = 0;
+            foreach (var str in strings)
+                fixedLen = Math.Max(fixedLen, Encoding.BigEndianUnicode.GetByteCount(str ?? string.Empty));
 
-            var unicodeAttr = property.GetCustomAttribute<UnicodeStringAttribute>();
-            if (unicodeAttr != null)
+            // Leading CompactInteger: byte width of each element
+            CompactIntegerSerializer.Write(bytes, typeof(int), fixedLen);
+
+            foreach (var str in strings)
             {
-                WriteUnicodeString(bytes, property, str, unicodeAttr.LengthBytes);
-                return;
-            }
-
-            var bcdAttr = property.GetCustomAttribute<BCDStringAttribute>();
-            if (bcdAttr != null)
-            {
-                if (bcdAttr.FixedLength.HasValue)
-                    WriteBCDStringFixed(bytes, str, bcdAttr.FixedLength.Value);
-                else
-                    WriteBCDStringUnbounded(bytes, str);
-                return;
-            }
-
-            if (property.IsDefined(typeof(LeadingLengthBCDStringAttribute), false))
-            {
-                WriteBCDStringPrefixed(bytes, property, str);
-                return;
+                var encoded = Encoding.BigEndianUnicode.GetBytes(str ?? string.Empty);
+                bytes.AddRange(encoded);
+                for (int i = encoded.Length; i < fixedLen; i++)
+                    bytes.Add(0);
             }
         }
 
-        public object Read(ReadOnlySpan<byte> bytes, ref int offset, PropertyInfo property, int remainingBytes)
+        internal static string[] ReadFixedLengthUnicodeStringArrayUnbounded(ReadOnlySpan<byte> bytes, ref int offset)
         {
-            var unicodeAttr = property.GetCustomAttribute<UnicodeStringAttribute>();
-            if (unicodeAttr != null)
-            {
-                return ReadUnicodeString(bytes, ref offset, property, unicodeAttr.LengthBytes);
-            }
+            int fixedLen = (int)CompactIntegerSerializer.Read(bytes, ref offset, typeof(int));
 
-            var bcdAttr = property.GetCustomAttribute<BCDStringAttribute>();
-            if (bcdAttr != null)
+            var list = new List<string>();
+            while (offset < bytes.Length)
             {
-                int bcdLength = bcdAttr.FixedLength ?? remainingBytes;
-                return ReadBCDString(bytes, ref offset, property, bcdLength);
-            }
+                if (offset + fixedLen > bytes.Length)
+                    throw new InvalidOperationException(
+                        $"Not enough bytes to read fixed-length unicode string (need {fixedLen}, have {bytes.Length - offset})");
 
-            if (property.IsDefined(typeof(LeadingLengthBCDStringAttribute), false))
-            {
-                int bcdLength = ReadLengthPrefix1(bytes, ref offset, property);
-                return ReadBCDString(bytes, ref offset, property, bcdLength);
+                var str = Encoding.BigEndianUnicode.GetString(bytes.Slice(offset, fixedLen));
+                offset += fixedLen;
+                list.Add(str.TrimEnd('\0'));
             }
-
-            throw new InvalidOperationException($"String property '{property.Name}' has no recognized encoding attribute.");
+            return list.ToArray();
         }
 
-        private static void WriteUnicodeString(List<byte> bytes, PropertyInfo property, string str, int lengthBytes)
+        internal static void WriteUnicodeStringArray(List<byte> bytes, string[]? strings, int lengthBytes)
         {
-            var encoded = Encoding.Unicode.GetBytes(str);
+            foreach (var str in strings ?? Array.Empty<string>())
+                WriteUnicodeString(bytes, "[]", str, lengthBytes);
+        }
+
+        internal static string[] ReadUnicodeStringArrayUnbounded(ReadOnlySpan<byte> bytes, ref int offset, string propertyName, int lengthBytes)
+        {
+            var list = new List<string>();
+            while (offset < bytes.Length)
+                list.Add(ReadUnicodeString(bytes, ref offset, propertyName, lengthBytes));
+            return list.ToArray();
+        }
+
+        internal static void WriteUnicodeString(List<byte> bytes, string propertyName, string? str, int lengthBytes)
+        {
+            var encoded = Encoding.Unicode.GetBytes(str ?? string.Empty);
 
             switch (lengthBytes)
             {
                 case 1:
                     if (encoded.Length > 255)
                         throw new InvalidOperationException(
-                            $"Property '{property.Name}' encoded string length {encoded.Length} exceeds 1-byte prefix max (255).");
+                            $"Property '{propertyName}' encoded string length {encoded.Length} exceeds 1-byte prefix max (255).");
                     bytes.Add((byte)encoded.Length);
                     break;
 
                 case 2:
                     if (encoded.Length > 65535)
                         throw new InvalidOperationException(
-                            $"Property '{property.Name}' encoded string length {encoded.Length} exceeds 2-byte prefix max (65535).");
+                            $"Property '{propertyName}' encoded string length {encoded.Length} exceeds 2-byte prefix max (65535).");
                     bytes.Add((byte)(encoded.Length >> 8));
                     bytes.Add((byte)(encoded.Length & 0xFF));
                     break;
 
                 default:
-                    throw new InvalidOperationException($"Invalid length bytes {lengthBytes} for property '{property.Name}'");
+                    throw new InvalidOperationException($"Invalid length bytes {lengthBytes} for property '{propertyName}'");
             }
 
             bytes.AddRange(encoded);
         }
 
-        private static string ReadUnicodeString(ReadOnlySpan<byte> bytes, ref int offset, PropertyInfo property, int lengthBytes)
+        internal static string ReadUnicodeString(ReadOnlySpan<byte> bytes, ref int offset, string propertyName, int lengthBytes)
         {
             int length = lengthBytes switch
             {
-                1 => ReadLengthPrefix1(bytes, ref offset, property),
-                2 => ReadLengthPrefix2(bytes, ref offset, property),
-                _ => throw new InvalidOperationException($"Invalid length prefix size {lengthBytes} for property '{property.Name}'")
+                1 => ReadLengthPrefix1(bytes, ref offset, propertyName),
+                2 => ReadLengthPrefix2(bytes, ref offset, propertyName),
+                _ => throw new InvalidOperationException($"Invalid length prefix size {lengthBytes} for property '{propertyName}'")
             };
 
             if (offset + length > bytes.Length)
                 throw new InvalidOperationException(
-                    $"Not enough bytes to read Unicode string '{property.Name}' (need {length}, have {bytes.Length - offset})");
+                    $"Not enough bytes to read Unicode string '{propertyName}' (need {length}, have {bytes.Length - offset})");
 
             var str = Encoding.Unicode.GetString(bytes.Slice(offset, length));
             offset += length;
             return str;
         }
 
-        private static void WriteBCDStringFixed(List<byte> bytes, string digits, int fixedLength)
+        internal static void WriteBCDStringFixed(List<byte> bytes, string? str, int fixedLength)
         {
-            // Pad with trailing zeros to fill the fixed byte length (2 digits per byte)
+            var digits = str ?? string.Empty;
             var padded = digits.PadRight(fixedLength * 2, '0');
 
             for (int i = 0; i < fixedLength; i++)
@@ -146,9 +138,9 @@ namespace DSC.TLink.Serialization
             }
         }
 
-        private static void WriteBCDStringUnbounded(List<byte> bytes, string digits)
+        internal static void WriteBCDStringUnbounded(List<byte> bytes, string? str)
         {
-            // Pad to even number of digits
+            var digits = str ?? string.Empty;
             if (digits.Length % 2 != 0)
                 digits += '0';
 
@@ -156,26 +148,26 @@ namespace DSC.TLink.Serialization
             WriteBCDStringFixed(bytes, digits, bcdLength);
         }
 
-        private static void WriteBCDStringPrefixed(List<byte> bytes, PropertyInfo property, string digits)
+        internal static void WriteBCDStringPrefixed(List<byte> bytes, string propertyName, string? str)
         {
-            // Pad to even number of digits
+            var digits = str ?? string.Empty;
             if (digits.Length % 2 != 0)
                 digits += '0';
 
             int bcdLength = digits.Length / 2;
             if (bcdLength > 255)
                 throw new InvalidOperationException(
-                    $"Property '{property.Name}' BCD byte count {bcdLength} exceeds 1-byte prefix max (255).");
+                    $"Property '{propertyName}' BCD byte count {bcdLength} exceeds 1-byte prefix max (255).");
 
             bytes.Add((byte)bcdLength);
             WriteBCDStringFixed(bytes, digits, bcdLength);
         }
 
-        private static string ReadBCDString(ReadOnlySpan<byte> bytes, ref int offset, PropertyInfo property, int fixedLength)
+        internal static string ReadBCDString(ReadOnlySpan<byte> bytes, ref int offset, string propertyName, int fixedLength)
         {
             if (offset + fixedLength > bytes.Length)
                 throw new InvalidOperationException(
-                    $"Not enough bytes to read BCD string '{property.Name}' (need {fixedLength}, have {bytes.Length - offset})");
+                    $"Not enough bytes to read BCD string '{propertyName}' (need {fixedLength}, have {bytes.Length - offset})");
 
             var sb = new StringBuilder(fixedLength * 2);
             for (int i = 0; i < fixedLength; i++)
@@ -188,17 +180,17 @@ namespace DSC.TLink.Serialization
             return sb.ToString().TrimEnd('0');
         }
 
-        private static int ReadLengthPrefix1(ReadOnlySpan<byte> bytes, ref int offset, PropertyInfo property)
+        private static int ReadLengthPrefix1(ReadOnlySpan<byte> bytes, ref int offset, string propertyName)
         {
             if (offset >= bytes.Length)
-                throw new InvalidOperationException($"Not enough bytes to read length prefix for '{property.Name}'");
+                throw new InvalidOperationException($"Not enough bytes to read length prefix for '{propertyName}'");
             return bytes[offset++];
         }
 
-        private static int ReadLengthPrefix2(ReadOnlySpan<byte> bytes, ref int offset, PropertyInfo property)
+        private static int ReadLengthPrefix2(ReadOnlySpan<byte> bytes, ref int offset, string propertyName)
         {
             if (offset + 1 >= bytes.Length)
-                throw new InvalidOperationException($"Not enough bytes to read 2-byte length prefix for '{property.Name}'");
+                throw new InvalidOperationException($"Not enough bytes to read 2-byte length prefix for '{propertyName}'");
             var length = (bytes[offset] << 8) | bytes[offset + 1];
             offset += 2;
             return length;

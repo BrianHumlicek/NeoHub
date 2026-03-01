@@ -1,4 +1,4 @@
-﻿// DSC TLink - a communications library for DSC Powerseries NEO alarm panels
+// DSC TLink - a communications library for DSC Powerseries NEO alarm panels
 // Copyright (C) 2024 Brian Humlicek
 //
 // This program is free software: you can redistribute it and/or modify
@@ -7,24 +7,21 @@
 // (at your option) any later version.
 //
 // This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY, without even the implied warranty of
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
 //
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-namespace DSC.TLink.Extensions
-{
-	internal static class EnumerableByteExtensions
-	{
-		public static IEnumerable<byte> Concat(this IEnumerable<byte> byteEnumerable, byte appendByte)
-		{
-			foreach (byte b in byteEnumerable)
-			{
-				yield return b;
-			}
-			yield return appendByte;
-		}
-	}
-}
+using DSC.TLink.ITv2.Messages;
+
+namespace DSC.TLink.ITv2;
+
+/// <summary>
+/// Represents a parsed ITv2 packet (after ITv2 framing and decryption are removed).
+/// </summary>
+internal readonly record struct ITv2Packet(
+    byte SenderSequence,
+    byte ReceiverSequence,
+    IMessageData Message);

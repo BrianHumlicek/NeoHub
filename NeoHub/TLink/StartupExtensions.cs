@@ -50,10 +50,6 @@ namespace DSC.TLink
             builder.Services.AddSingleton<SessionMediator>();
             builder.Services.AddSingleton<ITv2ConnectionHandler>();
 
-            // Scoped services (per-connection)
-            builder.Services.AddScoped<TLinkClient>();
-            builder.Services.AddScoped<ITv2Session>();
-
             // Configure Kestrel with ITv2 connection handler
             builder.WebHost.ConfigureKestrel((context, options) =>
 			{

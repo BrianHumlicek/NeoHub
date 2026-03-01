@@ -14,80 +14,41 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-using System.Reflection;
-
 namespace DSC.TLink.Serialization
 {
     /// <summary>
     /// Handles serialization of integers with [CompactInteger] attribute.
     /// Only stores significant bytes with a leading length prefix.
     /// </summary>
-    internal class CompactIntegerSerializer : ITypeSerializer
+    internal static class CompactIntegerSerializer
     {
-        public bool CanHandle(PropertyInfo property)
+        internal static void Write(List<byte> bytes, Type propertyType, object? value)
         {
-            if (!property.IsDefined(typeof(CompactIntegerAttribute), false))
-                return false;
-
-            var type = property.PropertyType;
-            var typeCode = Type.GetTypeCode(type);
-
-            return typeCode switch
-            {
-                TypeCode.Byte or TypeCode.SByte or
-                TypeCode.UInt16 or TypeCode.Int16 or
-                TypeCode.UInt32 or TypeCode.Int32 or
-                TypeCode.UInt64 or TypeCode.Int64 => true,
-                _ => false
-            };
-        }
-
-        public void Write(List<byte> bytes, PropertyInfo property, object? value)
-        {
-            var type = property.PropertyType;
-
-            // Get the full bytes representation using PrimitiveSerializer
-            byte[] fullBytes = PrimitiveSerializer.GetBytes(value ?? GetDefaultValue(type), type);
-
-            // Find the first significant byte
-            int startIndex = FindSignificantByteIndex(fullBytes, type);
-
-            // Calculate length of significant bytes
+            byte[] fullBytes = PrimitiveSerializer.GetBytes(value ?? GetDefaultValue(propertyType), propertyType);
+            int startIndex = FindSignificantByteIndex(fullBytes, propertyType);
             int length = fullBytes.Length - startIndex;
 
-            if (length > 255)
-                throw new InvalidOperationException(
-                    $"Property '{property.Name}' compact integer length {length} exceeds 1-byte max (255)");
-
-            // Write length prefix
             bytes.Add((byte)length);
-
-            // Write significant bytes
             bytes.AddRange(fullBytes.AsSpan(startIndex));
         }
 
-        public object Read(ReadOnlySpan<byte> bytes, ref int offset, PropertyInfo property, int remainingBytes)
+        internal static object Read(ReadOnlySpan<byte> bytes, ref int offset, Type propertyType)
         {
-            var type = property.PropertyType;
-
-            // Read length prefix
             if (offset >= bytes.Length)
                 throw new InvalidOperationException(
-                    $"Not enough bytes to read length prefix for compact integer '{property.Name}'");
+                    "Not enough bytes to read length prefix for compact integer");
 
             int length = bytes[offset++];
 
-            // Read the compact bytes
             if (offset + length > bytes.Length)
                 throw new InvalidOperationException(
-                    $"Not enough bytes to read compact integer '{property.Name}' (expected {length}, got {bytes.Length - offset})");
+                    $"Not enough bytes to read compact integer (expected {length}, got {bytes.Length - offset})");
 
             var compactBytes = bytes.Slice(offset, length);
             offset += length;
 
-            // Use PrimitiveSerializer to read with sign extension for signed types
-            bool isSigned = IsSigned(type);
-            return PrimitiveSerializer.ReadFromBytes(compactBytes, type, signExtend: isSigned);
+            bool isSigned = IsSigned(propertyType);
+            return PrimitiveSerializer.ReadFromBytes(compactBytes, propertyType, signExtend: isSigned);
         }
 
         private static int FindSignificantByteIndex(byte[] fullBytes, Type type)

@@ -42,9 +42,9 @@ namespace DSC.TLink.ITv2
             if (lengthByte1.Bit7())
             {
                 byte lengthByte2 = bytes.PopByte();
-                ushort encodedLength = BigEndianExtensions.U16((byte)(lengthByte1 & 0x7F), bytes.PopByte());
+                ushort encodedLength = BigEndianExtensions.U16((byte)(lengthByte1 & 0x7F), lengthByte2);
                 if (encodedLength > bytes.Length)
-                    throw new Exception($"Encoded message length {encodedLength} exceeds data length {bytes.Length}\nMessage {ILoggerExtensions.Enumerable2HexString(bytes.ToArray())}");
+                    throw new InvalidOperationException($"Encoded message length {encodedLength} exceeds data length {bytes.Length}\nMessage {new HexBytes(bytes.ToArray())}");
                 bytes = bytes.Slice(0, encodedLength);
                 encodedCRC = bytes.PopTrailingWord();
                 calculatedCRC = crc16([lengthByte1, lengthByte2, .. bytes]);
@@ -52,13 +52,13 @@ namespace DSC.TLink.ITv2
             else
             {
                 if (lengthByte1 > bytes.Length)
-                    throw new Exception($"Encoded message length {lengthByte1} exceeds data length {bytes.Length}\nMessage {ILoggerExtensions.Enumerable2HexString(bytes.ToArray())}");
+                    throw new InvalidOperationException($"Encoded message length {lengthByte1} exceeds data length {bytes.Length}\nMessage {new HexBytes(bytes.ToArray())}");
                 bytes = bytes.Slice(0, lengthByte1);
                 encodedCRC = bytes.PopTrailingWord();
                 calculatedCRC = crc16([lengthByte1, .. bytes]);
             }
             if (encodedCRC != calculatedCRC)
-                throw new Exception($"Framing CRC error!  The message CRC is 0x{encodedCRC:X4} but the calculated CRC is 0x{calculatedCRC:X4}\nMessage {ILoggerExtensions.Enumerable2HexString(bytes.ToArray())}");
+                throw new InvalidOperationException($"Framing CRC error!  The message CRC is 0x{encodedCRC:X4} but the calculated CRC is 0x{calculatedCRC:X4}\nMessage {new HexBytes(bytes.ToArray())}");
         }
 
         static int crc16(IEnumerable<byte> crcRange)

@@ -362,7 +362,6 @@
 
     public void Dispose()
     {
-        _cts.Cancel();
         LogService.LogReceived -= OnLogReceived;
         _renderTimer?.Dispose();
         _cts.Dispose();

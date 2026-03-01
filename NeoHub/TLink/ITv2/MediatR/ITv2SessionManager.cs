@@ -5,19 +5,19 @@ using Microsoft.Extensions.Logging;
 namespace DSC.TLink.ITv2.MediatR
 {
     /// <summary>
-    /// Manages active ITv2Session instances and routes commands to the correct session.
+    /// Manages active ITv2 session instances and routes commands to the correct session.
     /// </summary>
     public interface IITv2SessionManager
     {
-        internal void RegisterSession(string sessionId, ITv2Session session);
+        internal void RegisterSession(string sessionId, IITv2Session session);
         internal void UnregisterSession(string sessionId);
-        internal ITv2Session? GetSession(string sessionId);
+        internal IITv2Session? GetSession(string sessionId);
         IEnumerable<string> GetActiveSessions();
     }
 
     internal class ITv2SessionManager : IITv2SessionManager
     {
-        private readonly ConcurrentDictionary<string, ITv2Session> _sessions = new();
+        private readonly ConcurrentDictionary<string, IITv2Session> _sessions = new();
         private readonly IMediator _mediator;
         private readonly ILogger<ITv2SessionManager> _logger;
 
@@ -27,7 +27,7 @@ namespace DSC.TLink.ITv2.MediatR
             _logger = logger;
         }
 
-        public void RegisterSession(string sessionId, ITv2Session session)
+        public void RegisterSession(string sessionId, IITv2Session session)
         {
             if (_sessions.TryAdd(sessionId, session))
             {
@@ -51,7 +51,7 @@ namespace DSC.TLink.ITv2.MediatR
             }
         }
 
-        public ITv2Session? GetSession(string sessionId)
+        public IITv2Session? GetSession(string sessionId)
         {
             return _sessions.TryGetValue(sessionId, out var session) ? session : null;
         }
@@ -61,9 +61,6 @@ namespace DSC.TLink.ITv2.MediatR
             return _sessions.Keys.ToList();
         }
 
-        /// <summary>
-        /// Fire-and-forget publish, consistent with SessionMediator.PublishInboundMessage pattern.
-        /// </summary>
         private async void PublishLifecycleNotification(INotification notification)
         {
             try

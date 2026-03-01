@@ -15,14 +15,12 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 using DSC.TLink.ITv2.Enumerations;
-using DSC.TLink.ITv2.Transactions;
 using DSC.TLink.Serialization;
 
 namespace DSC.TLink.ITv2.Messages
 {
-	[ITv2Command(ITv2Command.ModuleControl_Partition_Arm_Control, isAppSequence: true)]
-	[SimpleAckTransaction]
-	public record PartitionArm : IMessageData
+	[ITv2Command(ITv2Command.ModuleControl_Partition_Arm_Control)]
+	public record PartitionArm : CommandMessageBase
 	{
         [CompactInteger]
 		public int Partition { get; init; }
