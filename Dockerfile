@@ -12,9 +12,13 @@ RUN dotnet restore "NeoHub/NeoHub/NeoHub.csproj"
 # Copy all source code
 COPY . .
 
+# GitHub Actions metadata passed in at docker build time
+ARG GITHUB_SHA
+ARG GITHUB_RUN_NUMBER
+
 # Build and publish
 WORKDIR "/src/NeoHub/NeoHub"
-RUN dotnet publish "NeoHub.csproj" -c Release -o /app/publish /p:UseAppHost=false
+RUN dotnet publish "NeoHub.csproj" -c Release -o /app/publish /p:UseAppHost=false /p:GITHUB_SHA=$GITHUB_SHA /p:GITHUB_RUN_NUMBER=$GITHUB_RUN_NUMBER
 
 # Runtime stage
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
