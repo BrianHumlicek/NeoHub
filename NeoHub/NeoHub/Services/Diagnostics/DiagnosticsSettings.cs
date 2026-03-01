@@ -20,12 +20,6 @@ namespace NeoHub.Services.Diagnostics
         [Range(100, 100_000)]
         public int MaxLogEntries { get; set; } = 5000;
 
-        [Display(
-            Name = "App Only",
-            Description = "Only capture logs from solution assemblies (NeoHub, DSC.TLink)",
-            Order = 3)]
-        public bool AppOnly { get; set; } = true;
-
         /// <summary>
         /// Per-category log level overrides. Managed from the Diagnostics page.
         /// Key = full category name, Value = minimum log level for that category.

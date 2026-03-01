@@ -4,7 +4,9 @@ namespace NeoHub.Services.Diagnostics
 {
     /// <summary>
     /// Custom logger provider that feeds logs into the diagnostics service.
-    /// Supports per-category log level overrides and app-only filtering.
+    /// Supports per-category log level overrides. Non-solution categories are
+    /// clamped to the floor defined in appsettings.json Logging:LogLevel so
+    /// verbose levels (Trace/Debug) only apply to solution code.
     /// </summary>
     public class DiagnosticsLoggerProvider : ILoggerProvider
     {
@@ -12,18 +14,21 @@ namespace NeoHub.Services.Diagnostics
 
         private readonly IDiagnosticsLogService _diagnosticsService;
         private readonly IOptionsMonitor<DiagnosticsSettings> _settings;
+        private readonly IConfiguration _configuration;
 
         public DiagnosticsLoggerProvider(
             IDiagnosticsLogService diagnosticsService,
-            IOptionsMonitor<DiagnosticsSettings> settings)
+            IOptionsMonitor<DiagnosticsSettings> settings,
+            IConfiguration configuration)
         {
             _diagnosticsService = diagnosticsService;
             _settings = settings;
+            _configuration = configuration;
         }
 
         public ILogger CreateLogger(string categoryName)
         {
-            return new DiagnosticsLogger(categoryName, _diagnosticsService, _settings);
+            return new DiagnosticsLogger(categoryName, _diagnosticsService, _settings, _configuration);
         }
 
         public void Dispose() { }
@@ -33,15 +38,18 @@ namespace NeoHub.Services.Diagnostics
             private readonly string _category;
             private readonly IDiagnosticsLogService _diagnosticsService;
             private readonly IOptionsMonitor<DiagnosticsSettings> _settings;
+            private readonly IConfiguration _configuration;
 
             public DiagnosticsLogger(
                 string category,
                 IDiagnosticsLogService diagnosticsService,
-                IOptionsMonitor<DiagnosticsSettings> settings)
+                IOptionsMonitor<DiagnosticsSettings> settings,
+                IConfiguration configuration)
             {
                 _category = category;
                 _diagnosticsService = diagnosticsService;
                 _settings = settings;
+                _configuration = configuration;
             }
 
             public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
@@ -50,16 +58,20 @@ namespace NeoHub.Services.Diagnostics
             {
                 var settings = _settings.CurrentValue;
 
-                // App-only filter: skip non-solution categories entirely
-                if (settings.AppOnly && !IsSolutionCategory(_category))
-                    return false;
+                // Per-category override takes precedence, otherwise use global minimum
+                var effectiveLevel = settings.CategoryOverrides.TryGetValue(_category, out var categoryLevel)
+                    ? categoryLevel
+                    : settings.MinimumLogLevel;
 
-                // Per-category override takes precedence
-                if (settings.CategoryOverrides.TryGetValue(_category, out var categoryLevel))
-                    return logLevel >= categoryLevel;
+                // Non-solution categories: clamp to the appsettings floor so
+                // verbose levels only ever apply to solution code
+                if (!IsSolutionCategory(_category))
+                {
+                    var configFloor = ResolveConfigLevel(_category);
+                    effectiveLevel = (LogLevel)Math.Max((int)effectiveLevel, (int)configFloor);
+                }
 
-                // Fall back to global minimum
-                return logLevel >= settings.MinimumLogLevel;
+                return logLevel >= effectiveLevel;
             }
 
             public void Log<TState>(
@@ -80,6 +92,35 @@ namespace NeoHub.Services.Diagnostics
                     Message = formatter(state, exception),
                     Exception = exception
                 });
+            }
+
+            /// <summary>
+            /// Resolves the configured log level for a category by walking
+            /// Logging:LogLevel with progressively shorter prefixes, matching
+            /// the same precedence rules ASP.NET Core uses.
+            /// </summary>
+            private LogLevel ResolveConfigLevel(string category)
+            {
+                var section = _configuration.GetSection("Logging:LogLevel");
+
+                var prefix = category;
+                while (true)
+                {
+                    var value = section[prefix];
+                    if (value != null && Enum.TryParse<LogLevel>(value, out var level))
+                        return level;
+
+                    var lastDot = prefix.LastIndexOf('.');
+                    if (lastDot < 0)
+                        break;
+                    prefix = prefix[..lastDot];
+                }
+
+                var defaultValue = section["Default"];
+                if (defaultValue != null && Enum.TryParse<LogLevel>(defaultValue, out var defaultLevel))
+                    return defaultLevel;
+
+                return LogLevel.Information;
             }
 
             private static bool IsSolutionCategory(string category)

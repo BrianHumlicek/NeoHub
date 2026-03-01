@@ -30,13 +30,7 @@
                 }
             </MudSelect>
 
-            <MudSwitch T="bool" 
-                       Value="settings.AppOnly"
-                       ValueChanged="OnAppOnlyChanged"
-                       Label="App only" 
-                       Color="Color.Secondary" />
-
-            <MudSwitch T="bool" 
+            <MudSwitch T="bool"
                        @bind-Value="autoScroll" 
                        Label="Auto-scroll" 
                        Color="Color.Primary" />
@@ -204,13 +198,6 @@
         await SaveSettingsAsync();
     }
 
-    private async Task OnAppOnlyChanged(bool value)
-    {
-        settings.AppOnly = value;
-        FilterLogs();
-        await SaveSettingsAsync();
-    }
-
     private async Task OnCategoryLevelChanged(CategoryRow row, string value)
     {
         if (value == "Global")
@@ -313,7 +300,6 @@
     {
         MinimumLogLevel = source.MinimumLogLevel,
         MaxLogEntries = source.MaxLogEntries,
-        AppOnly = source.AppOnly,
         CategoryOverrides = new Dictionary<string, LogLevel>(source.CategoryOverrides)
     };
 

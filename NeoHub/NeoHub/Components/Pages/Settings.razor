@@ -131,8 +131,8 @@
                 <div>
                     <MudSwitch T="bool"
                                Label="@property.DisplayName"
-                               Checked="@((bool)(currentValue ?? false))"
-                               CheckedChanged="@((bool value) => propInfo.SetValue(settings, value))"
+                               Value="@((bool)(currentValue ?? false))"
+                               ValueChanged="@((bool value) => propInfo.SetValue(settings, value))"
                                Color="Color.Primary" />
                     @if (!string.IsNullOrEmpty(property.Description))
                     {
