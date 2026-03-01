@@ -14,4 +14,32 @@
     <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.23.0" />
     <PackageReference Include="MudBlazor" Version="8.15.0" />
   </ItemGroup>
+
+  <Target Name="StampBuildInfo" BeforeTargets="CoreCompile">
+    <Exec Command="git rev-parse --short HEAD" ConsoleToMSBuild="true" IgnoreExitCode="true">
+      <Output TaskParameter="ConsoleOutput" PropertyName="GitShortHash" />
+    </Exec>
+    <PropertyGroup>
+      <GitShortHash Condition="'$(GitShortHash)' == ''">unknown</GitShortHash>
+      <BuildYear>$([System.DateTime]::UtcNow.Year)</BuildYear>
+      <BuildMonth>$([System.DateTime]::UtcNow.Month)</BuildMonth>
+      <BuildDay>$([System.DateTime]::UtcNow.Day)</BuildDay>
+      <BuildHour>$([System.DateTime]::UtcNow.Hour)</BuildHour>
+      <BuildMinute>$([System.DateTime]::UtcNow.Minute)</BuildMinute>
+      <BuildInfoFile>$(IntermediateOutputPath)BuildInfo.g.cs</BuildInfoFile>
+    </PropertyGroup>
+    <ItemGroup>
+      <BuildInfoLines Include="namespace NeoHub%3B" />
+      <BuildInfoLines Include="internal static class BuildInfo" />
+      <BuildInfoLines Include="{" />
+      <BuildInfoLines Include='    public const string GitCommit = "$(GitShortHash)"%3B' />
+      <BuildInfoLines Include="    public static readonly DateTime BuildTimeUtc = new($(BuildYear), $(BuildMonth), $(BuildDay), $(BuildHour), $(BuildMinute), 0, DateTimeKind.Utc)%3B" />
+      <BuildInfoLines Include="}" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(BuildInfoFile)" Overwrite="true" Lines="@(BuildInfoLines)" />
+    <ItemGroup>
+      <Compile Include="$(BuildInfoFile)" />
+    </ItemGroup>
+  </Target>
+
 </Project>

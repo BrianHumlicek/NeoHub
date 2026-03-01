@@ -96,10 +96,21 @@
 
     .nav-scrollable {
         /* Never collapse the sidebar for wide screens */
-        display: block;
+        display: flex;
+        flex-direction: column;
 
         /* Allow sidebar to scroll for tall menus */
         height: calc(100vh - 3.5rem);
         overflow-y: auto;
     }
+}
+
+.nav-version {
+    margin-top: auto;
+    padding: 0.75rem 1rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.45);
+    font-family: monospace;
+    font-size: 0.7rem;
+    line-height: 1.6;
 }

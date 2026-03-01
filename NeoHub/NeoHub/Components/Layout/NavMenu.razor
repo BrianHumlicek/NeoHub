@@ -22,5 +22,22 @@
             <MudNavLink Href="/settings" Icon="@Icons.Material.Filled.Settings">Settings</MudNavLink>
         </div>
     </nav>
+    <div class="nav-version" onclick="event.stopPropagation()">
+        <div>GitHub @BuildInfo.GitCommit</div>
+        <div>@BuildInfo.BuildTimeUtc.ToString("yyyy-MM-dd HH:mm") UTC · @BuildAge</div>
+    </div>
 </div>
+
+@code {
+    private static string BuildAge
+    {
+        get
+        {
+            var age = DateTime.UtcNow - BuildInfo.BuildTimeUtc;
+            return age.TotalHours < 48
+                ? $"{(int)age.TotalHours}h ago"
+                : $"{(int)age.TotalDays}d ago";
+        }
+    }
+}
 
