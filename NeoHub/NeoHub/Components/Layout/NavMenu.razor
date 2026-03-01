@@ -8,7 +8,7 @@
 
 <input type="checkbox" title="Navigation menu" class="navbar-toggler" />
 
-<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+<div class="nav-scrollable" onclick="if (window.matchMedia('(max-width: 640.98px)').matches) document.querySelector('.navbar-toggler').click()">
     <nav class="flex-column">
         <div class="nav-item px-3">
             <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Home">Home</MudNavLink>
@@ -23,13 +23,17 @@
         </div>
     </nav>
     <div class="nav-version" onclick="event.stopPropagation()">
-		<div>GitHub @GithubShortHash · Build @BuildInfo.BuildNumber</div>
+        <div>GitHub @GithubShortHash · Build @BuildInfo.BuildNumber</div>
         <div>@BuildInfo.BuildTimeUtc.ToString("yyyy-MM-dd HH:mm") UTC · @BuildAge</div>
     </div>
 </div>
 
 @code {
-	private static string GithubShortHash => BuildInfo.GitCommit.Substring(0, 7);
+    private static string GithubShortHash =>
+        string.IsNullOrEmpty(BuildInfo.GitCommit)
+            ? "unknown"
+            : BuildInfo.GitCommit[..Math.Min(7, BuildInfo.GitCommit.Length)];
+
     private static string BuildAge
     {
         get

@@ -98,28 +98,49 @@
         PanelState.PartitionStateChanged += OnPartitionStateChanged;
 
         // Refresh UI every second for countdown and audio management
-        _refreshTimer = new Timer(_ => InvokeAsync(async () =>
+        _refreshTimer = new Timer(_ =>
         {
-            if (_cts.IsCancellationRequested) return;
+            _ = SafeInvokeAsync(async () =>
+            {
+                var hasActiveDelay = HasActiveExitDelay();
+                await UpdateExitDelayBeepAsync(hasActiveDelay, _cts.Token);
 
-            var hasActiveDelay = HasActiveExitDelay();
-            await UpdateExitDelayBeepAsync(hasActiveDelay, _cts.Token);
-
-            if (hasActiveDelay && !_cts.Token.IsCancellationRequested)
-                StateHasChanged();
-        }), null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
+                if (hasActiveDelay && !_cts.Token.IsCancellationRequested)
+                    StateHasChanged();
+            });
+        }, null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
     }
 
     private void OnPartitionStateChanged(object? sender, PartitionStateChangedEventArgs e)
     {
-        InvokeAsync(async () =>
+        _ = SafeInvokeAsync(async () =>
         {
-            if (_cts.IsCancellationRequested) return;
-
             await UpdateExitDelayBeepAsync(HasActiveExitDelay(), _cts.Token);
             if (!_cts.Token.IsCancellationRequested)
                 StateHasChanged();
         });
+    }
+
+    private async Task SafeInvokeAsync(Func<Task> work)
+    {
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                if (_cts.IsCancellationRequested)
+                    return;
+
+                await work();
+            });
+        }
+        catch (ObjectDisposedException)
+        {
+            // Component is being torn down
+        }
+        catch (InvalidOperationException)
+        {
+            // Renderer is no longer available
+        }
     }
 
     private bool HasActiveExitDelay()
@@ -183,15 +204,6 @@
     {
         _cts.Cancel();
         _refreshTimer?.Dispose();
-
-        if (_isBeeping)
-        {
-            try
-            {
-                JS.InvokeVoidAsync("exitDelayBeep.stopBeeping");
-            }
-            catch { }
-        }
 
         PanelState.PartitionStateChanged -= OnPartitionStateChanged;
         _cts.Dispose();

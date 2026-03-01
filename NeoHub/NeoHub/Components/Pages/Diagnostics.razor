@@ -169,15 +169,29 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (_cts.IsCancellationRequested) return;
+
         if (autoScroll)
-            await JS.InvokeVoidAsync("scrollToBottom", "log-container");
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("scrollToBottom", "log-container");
+            }
+            catch (ObjectDisposedException)
+            {
+                // Component/renderer disposed during teardown
+            }
+            catch (InvalidOperationException)
+            {
+                // Renderer is no longer available
+            }
+        }
     }
 
     private void OnLogReceived(DiagnosticsLogEntry entry)
     {
-        InvokeAsync(() =>
+        _ = SafeInvokeAsync(() =>
         {
-            if (_cts.IsCancellationRequested) return;
             allLogs.Add(entry);
 
             // Add new category if discovered
@@ -186,7 +200,31 @@
 
             filteredLogs.Add(entry);
             StateHasChanged();
+
+            return Task.CompletedTask;
         });
+    }
+
+    private async Task SafeInvokeAsync(Func<Task> work)
+    {
+        if (_cts.IsCancellationRequested) return;
+
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                if (_cts.IsCancellationRequested) return;
+                await work();
+            });
+        }
+        catch (ObjectDisposedException)
+        {
+            // Component/renderer disposed
+        }
+        catch (InvalidOperationException)
+        {
+            // Renderer is no longer available
+        }
     }
 
     #region Settings Changes (all auto-save)

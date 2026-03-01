@@ -86,7 +86,15 @@
 }
 
 .navbar-toggler:checked ~ .nav-scrollable {
-    display: block;
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 3.5rem);
+}
+
+.navbar-toggler:checked ~ .nav-scrollable nav {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
 }
 
 @media (min-width: 641px) {
@@ -95,12 +103,14 @@
     }
 
     .nav-scrollable {
-        /* Never collapse the sidebar for wide screens */
         display: flex;
         flex-direction: column;
-
-        /* Allow sidebar to scroll for tall menus */
         height: calc(100vh - 3.5rem);
+    }
+
+    .nav-scrollable nav {
+        flex: 1 1 auto;
+        min-height: 0;
         overflow-y: auto;
     }
 }
