@@ -104,7 +104,7 @@
 
     @* ── Log Table ── *@
     <MudPaper Class="pa-4" Style="height: 60vh; overflow-y: auto;" id="log-container">
-        <MudTable Items="@filteredLogs" 
+        <MudTable Items="@allLogs" 
                   Dense="true" 
                   Hover="true" 
                   FixedHeader="true"
@@ -143,7 +143,7 @@
     </MudPaper>
 
     <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-2">
-        Showing @filteredLogs.Count of @allLogs.Count total log entries (buffer max: @settings.MaxLogEntries)
+        Showing @allLogs.Count log entries (buffer max: @settings.MaxLogEntries)
     </MudText>
 </MudContainer>
 
@@ -153,18 +153,19 @@
     private DiagnosticsSettings settings = new();
     private bool autoScroll = true;
     private List<DiagnosticsLogEntry> allLogs = new();
-    private List<DiagnosticsLogEntry> filteredLogs = new();
     private List<CategoryRow> categoryRows = new();
 
     private CancellationTokenSource _cts = new();
+    private Timer? _renderTimer;
+    private bool _renderScheduled;
 
     protected override void OnInitialized()
     {
         settings = CloneSettings(SettingsMonitor.CurrentValue);
         allLogs = LogService.GetLogs().ToList();
         RefreshCategoryRows();
-        FilterLogs();
         LogService.LogReceived += OnLogReceived;
+        _renderTimer = new Timer(OnRenderTimerElapsed, null, Timeout.Infinite, Timeout.Infinite);
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -194,13 +195,25 @@
         {
             allLogs.Add(entry);
 
-            // Add new category if discovered
             if (!categoryRows.Any(r => r.FullName == entry.Category))
                 RefreshCategoryRows();
 
-            filteredLogs.Add(entry);
-            StateHasChanged();
+            if (!_renderScheduled)
+            {
+                _renderScheduled = true;
+                _renderTimer?.Change(200, Timeout.Infinite);
+            }
 
+            return Task.CompletedTask;
+        });
+    }
+
+    private void OnRenderTimerElapsed(object? state)
+    {
+        _ = SafeInvokeAsync(() =>
+        {
+            _renderScheduled = false;
+            StateHasChanged();
             return Task.CompletedTask;
         });
     }
@@ -219,11 +232,9 @@
         }
         catch (ObjectDisposedException)
         {
-            // Component/renderer disposed
         }
         catch (InvalidOperationException)
         {
-            // Renderer is no longer available
         }
     }
 
@@ -232,7 +243,6 @@
     private async Task OnGlobalLogLevelChanged(LogLevel level)
     {
         settings.MinimumLogLevel = level;
-        FilterLogs();
         await SaveSettingsAsync();
     }
 
@@ -252,7 +262,6 @@
             row.HasOverride = true;
         }
 
-        FilterLogs();
         await SaveSettingsAsync();
     }
 
@@ -261,7 +270,6 @@
         settings.CategoryOverrides.Remove(row.FullName);
         row.SelectedLevel = "Global";
         row.HasOverride = false;
-        FilterLogs();
         await SaveSettingsAsync();
     }
 
@@ -272,12 +280,7 @@
 
     #endregion
 
-    #region Filtering & Categories
-
-    private void FilterLogs()
-    {
-        filteredLogs = allLogs.ToList(); // Show everything the provider captured
-    }
+    #region Categories
 
     private void RefreshCategoryRows()
     {
@@ -305,7 +308,6 @@
     {
         LogService.Clear();
         allLogs.Clear();
-        filteredLogs.Clear();
     }
 
     private async Task DownloadLogs()
@@ -315,7 +317,7 @@
         sb.AppendLine(new string('=', 80));
         sb.AppendLine();
 
-        foreach (var entry in filteredLogs)
+        foreach (var entry in allLogs)
         {
             sb.AppendLine($"[{entry.Timestamp.ToLocalTime():yyyy-MM-dd HH:mm:ss.fff}] [{entry.LogLevel}] {entry.Category}");
             sb.AppendLine($"  {entry.Message}");
@@ -362,6 +364,7 @@
     {
         _cts.Cancel();
         LogService.LogReceived -= OnLogReceived;
+        _renderTimer?.Dispose();
         _cts.Dispose();
     }
 

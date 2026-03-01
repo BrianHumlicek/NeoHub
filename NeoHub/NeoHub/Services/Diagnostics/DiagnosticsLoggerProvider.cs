@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Primitives;
 
 namespace NeoHub.Services.Diagnostics
 {
@@ -15,6 +17,8 @@ namespace NeoHub.Services.Diagnostics
         private readonly IDiagnosticsLogService _diagnosticsService;
         private readonly IOptionsMonitor<DiagnosticsSettings> _settings;
         private readonly IConfiguration _configuration;
+        private readonly ConcurrentDictionary<string, LogLevel> _configLevelCache = new();
+        private readonly IDisposable? _configChangeRegistration;
 
         public DiagnosticsLoggerProvider(
             IDiagnosticsLogService diagnosticsService,
@@ -24,32 +28,44 @@ namespace NeoHub.Services.Diagnostics
             _diagnosticsService = diagnosticsService;
             _settings = settings;
             _configuration = configuration;
+
+            _configChangeRegistration = ChangeToken.OnChange(
+                () => _configuration.GetReloadToken(),
+                () => _configLevelCache.Clear());
         }
 
         public ILogger CreateLogger(string categoryName)
         {
-            return new DiagnosticsLogger(categoryName, _diagnosticsService, _settings, _configuration);
+            return new DiagnosticsLogger(categoryName, _diagnosticsService, _settings, _configuration, _configLevelCache);
         }
 
-        public void Dispose() { }
+        public void Dispose()
+        {
+            _configChangeRegistration?.Dispose();
+        }
 
         private class DiagnosticsLogger : ILogger
         {
             private readonly string _category;
+            private readonly bool _isSolutionCategory;
             private readonly IDiagnosticsLogService _diagnosticsService;
             private readonly IOptionsMonitor<DiagnosticsSettings> _settings;
             private readonly IConfiguration _configuration;
+            private readonly ConcurrentDictionary<string, LogLevel> _configLevelCache;
 
             public DiagnosticsLogger(
                 string category,
                 IDiagnosticsLogService diagnosticsService,
                 IOptionsMonitor<DiagnosticsSettings> settings,
-                IConfiguration configuration)
+                IConfiguration configuration,
+                ConcurrentDictionary<string, LogLevel> configLevelCache)
             {
                 _category = category;
+                _isSolutionCategory = IsSolutionCategory(category);
                 _diagnosticsService = diagnosticsService;
                 _settings = settings;
                 _configuration = configuration;
+                _configLevelCache = configLevelCache;
             }
 
             public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
@@ -65,9 +81,9 @@ namespace NeoHub.Services.Diagnostics
 
                 // Non-solution categories: clamp to the appsettings floor so
                 // verbose levels only ever apply to solution code
-                if (!IsSolutionCategory(_category))
+                if (!_isSolutionCategory)
                 {
-                    var configFloor = ResolveConfigLevel(_category);
+                    var configFloor = _configLevelCache.GetOrAdd(_category, ResolveConfigLevelCore, _configuration);
                     effectiveLevel = (LogLevel)Math.Max((int)effectiveLevel, (int)configFloor);
                 }
 
@@ -99,9 +115,9 @@ namespace NeoHub.Services.Diagnostics
             /// Logging:LogLevel with progressively shorter prefixes, matching
             /// the same precedence rules ASP.NET Core uses.
             /// </summary>
-            private LogLevel ResolveConfigLevel(string category)
+            private static LogLevel ResolveConfigLevelCore(string category, IConfiguration configuration)
             {
-                var section = _configuration.GetSection("Logging:LogLevel");
+                var section = configuration.GetSection("Logging:LogLevel");
 
                 var prefix = category;
                 while (true)
@@ -125,7 +141,12 @@ namespace NeoHub.Services.Diagnostics
 
             private static bool IsSolutionCategory(string category)
             {
-                return SolutionPrefixes.Any(p => category.StartsWith(p, StringComparison.Ordinal));
+                foreach (var prefix in SolutionPrefixes)
+                {
+                    if (category.StartsWith(prefix, StringComparison.Ordinal))
+                        return true;
+                }
+                return false;
             }
         }
     }

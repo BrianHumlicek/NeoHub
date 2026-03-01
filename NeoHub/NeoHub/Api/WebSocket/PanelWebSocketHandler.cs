@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Text;
@@ -80,12 +81,13 @@ namespace NeoHub.Api.WebSocket
         private async Task ReceiveMessagesAsync(System.Net.WebSockets.WebSocket webSocket, string clientId)
         {
             var buffer = new byte[4096];
+            var segment = new ArraySegment<byte>(buffer);
 
             try
             {
                 while (webSocket.State == WebSocketState.Open)
                 {
-                    var result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+                    var result = await webSocket.ReceiveAsync(segment, CancellationToken.None);
 
                     if (result.MessageType == WebSocketMessageType.Close)
                     {
@@ -263,8 +265,17 @@ namespace NeoHub.Api.WebSocket
 
             _logger.LogTrace("Client {ClientId} → {MessageType}: {Json}", clientId, message.GetType().Name, json);
 
-            var bytes = Encoding.UTF8.GetBytes(json);
-            await webSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None);
+            var maxByteCount = Encoding.UTF8.GetMaxByteCount(json.Length);
+            var rentedBuffer = ArrayPool<byte>.Shared.Rent(maxByteCount);
+            try
+            {
+                var byteCount = Encoding.UTF8.GetBytes(json, 0, json.Length, rentedBuffer, 0);
+                await webSocket.SendAsync(new ArraySegment<byte>(rentedBuffer, 0, byteCount), WebSocketMessageType.Text, true, CancellationToken.None);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(rentedBuffer);
+            }
         }
 
         private async Task SendErrorAsync(System.Net.WebSockets.WebSocket webSocket, string errorMessage, string clientId)
