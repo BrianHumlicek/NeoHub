@@ -70,5 +70,18 @@ namespace DSC.TLink.ITv2
             Order = 10)]
         [Range(1, 65535)]
         public int ListenPort { get; set; } = DefaultListenPort;
+
+        /// <summary>
+        /// Maximum number of zones to pull from the panel.
+        /// The actual count used is the lesser of this value and the panel's reported max.
+        /// Set to 0 or omit to use the panel's reported max.
+        /// </summary>
+        [Display(
+            Name = "Max Zones",
+            Description = "Limit how many zones to pull (0 = use panel max)",
+            GroupName = "Network",
+            Order = 11)]
+        [Range(0, 256)]
+        public int MaxZones { get; set; }
     }
 }

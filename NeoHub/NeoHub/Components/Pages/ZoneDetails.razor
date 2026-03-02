@@ -5,7 +5,7 @@
 @inject NavigationManager Navigation
 @implements IDisposable
 
-<PageTitle>Zone Details - Partition @PartitionNumber</PageTitle>
+<PageTitle>Zone Details - @partitionDisplayName</PageTitle>
 
 <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
     <MudBreadcrumbs Items="breadcrumbs" Class="mb-4"></MudBreadcrumbs>
@@ -26,7 +26,7 @@
     {
         <MudPaper Class="pa-4 mb-4">
             <MudStack Row="true" AlignItems="AlignItems.Center">
-                <MudText Typo="Typo.h4">Partition @PartitionNumber</MudText>
+                <MudText Typo="Typo.h4">@partitionDisplayName</MudText>
                 <MudSpacer />
                 <MudChip T="string" 
                          Color="@(partition.IsReady ? Color.Success : Color.Warning)" 
@@ -62,7 +62,13 @@
                         <MudChip T="string" Size="Size.Small">@context.ZoneNumber</MudChip>
                     </MudTd>
                     <MudTd DataLabel="Name">
-                        @(string.IsNullOrEmpty(context.ZoneName) ? $"Zone {context.ZoneNumber}" : context.ZoneName)
+                        <MudStack Spacing="0">
+                            <MudText>@(context.DisplayNameLine1 ?? $"Zone {context.ZoneNumber}")</MudText>
+                            @if (!string.IsNullOrEmpty(context.DisplayNameLine2))
+                            {
+                                <MudText>@context.DisplayNameLine2</MudText>
+                            }
+                        </MudStack>
                     </MudTd>
                     <MudTd DataLabel="Status">
                         <MudChip T="string" 
@@ -121,19 +127,20 @@
     private PartitionState? partition;
     private List<ZoneState> zonesForPartition = new();
     private List<BreadcrumbItem> breadcrumbs = new();
+    private string partitionDisplayName = "";
 
     private CancellationTokenSource _cts = new();
 
     protected override void OnInitialized()
     {
+        LoadData();
+
         breadcrumbs = new List<BreadcrumbItem>
         {
             new BreadcrumbItem("Home", href: "/"),
             new BreadcrumbItem($"Session: {SessionId}", href: null, disabled: true),
-            new BreadcrumbItem($"Partition {PartitionNumber}", href: null, disabled: true)
+            new BreadcrumbItem(partitionDisplayName, href: null, disabled: true)
         };
-
-        LoadData();
         PanelState.PartitionStateChanged += OnStateChanged;
         PanelState.ZoneStateChanged += OnStateChanged;
     }
@@ -142,6 +149,7 @@
     {
         session = PanelState.GetSession(SessionId);
         partition = PanelState.GetPartition(SessionId, (byte)PartitionNumber);
+        partitionDisplayName = partition?.DisplayName ?? $"Partition {PartitionNumber}";
 
         if (session != null)
         {

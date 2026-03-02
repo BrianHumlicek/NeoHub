@@ -24,8 +24,13 @@ namespace DSC.TLink.Serialization
     {
         internal static void Write(List<byte> bytes, Type propertyType, object? value)
         {
-            byte[] fullBytes = PrimitiveSerializer.GetBytes(value ?? GetDefaultValue(propertyType), propertyType);
-            int startIndex = FindSignificantByteIndex(fullBytes, propertyType);
+            var underlyingType = propertyType.IsEnum ? Enum.GetUnderlyingType(propertyType) : propertyType;
+            var rawValue = value != null && propertyType.IsEnum
+                ? Convert.ChangeType(value, underlyingType)
+                : value ?? GetDefaultValue(underlyingType);
+
+            byte[] fullBytes = PrimitiveSerializer.GetBytes(rawValue, underlyingType);
+            int startIndex = FindSignificantByteIndex(fullBytes);
             int length = fullBytes.Length - startIndex;
 
             bytes.Add((byte)length);
@@ -47,57 +52,23 @@ namespace DSC.TLink.Serialization
             var compactBytes = bytes.Slice(offset, length);
             offset += length;
 
-            bool isSigned = IsSigned(propertyType);
-            return PrimitiveSerializer.ReadFromBytes(compactBytes, propertyType, signExtend: isSigned);
+            var underlyingType = propertyType.IsEnum ? Enum.GetUnderlyingType(propertyType) : propertyType;
+            var rawValue = PrimitiveSerializer.ReadFromBytes(compactBytes, underlyingType, signExtend: false);
+
+            return propertyType.IsEnum ? Enum.ToObject(propertyType, rawValue) : rawValue;
         }
 
-        private static int FindSignificantByteIndex(byte[] fullBytes, Type type)
+        private static int FindSignificantByteIndex(byte[] fullBytes)
         {
             int startIndex = 0;
-            bool isSigned = IsSigned(type);
 
-            if (isSigned)
+            // Skip leading zero bytes, always keep at least one byte
+            while (startIndex < fullBytes.Length - 1 && fullBytes[startIndex] == 0)
             {
-                // For signed types, keep the byte with the sign bit
-                bool isNegative = (fullBytes[0] & 0x80) != 0;
-                
-                for (int i = 0; i < fullBytes.Length - 1; i++)
-                {
-                    byte currentByte = fullBytes[i];
-                    byte nextByte = fullBytes[i + 1];
-                    
-                    if (isNegative)
-                    {
-                        if (currentByte == 0xFF && (nextByte & 0x80) != 0)
-                            startIndex = i + 1;
-                        else
-                            break;
-                    }
-                    else
-                    {
-                        if (currentByte == 0x00 && (nextByte & 0x80) == 0)
-                            startIndex = i + 1;
-                        else
-                            break;
-                    }
-                }
-            }
-            else
-            {
-                // For unsigned types, skip leading zeros
-                while (startIndex < fullBytes.Length - 1 && fullBytes[startIndex] == 0)
-                {
-                    startIndex++;
-                }
+                startIndex++;
             }
 
             return startIndex;
-        }
-
-        private static bool IsSigned(Type type)
-        {
-            return Type.GetTypeCode(type) is 
-                TypeCode.SByte or TypeCode.Int16 or TypeCode.Int32 or TypeCode.Int64;
         }
 
         private static object GetDefaultValue(Type type)

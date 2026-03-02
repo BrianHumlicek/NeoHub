@@ -11,6 +11,7 @@ namespace NeoHub.Services
         public event EventHandler<SessionStateChangedEventArgs>? SessionStateChanged;
         public event EventHandler<PartitionStateChangedEventArgs>? PartitionStateChanged;
         public event EventHandler<ZoneStateChangedEventArgs>? ZoneStateChanged;
+        public event EventHandler<ConfigurationCompleteEventArgs>? ConfigurationComplete;
 
         public PanelStateService(ILogger<PanelStateService> logger)
         {
@@ -111,6 +112,16 @@ namespace NeoHub.Services
                 SessionId = sessionId,
                 Zone = zone
             });
+        }
+
+        #endregion
+
+        #region Configuration Complete
+
+        public void OnConfigurationComplete(string sessionId)
+        {
+            _logger.LogInformation("Configuration complete for session {SessionId}", sessionId);
+            ConfigurationComplete?.Invoke(this, new ConfigurationCompleteEventArgs { SessionId = sessionId });
         }
 
         #endregion

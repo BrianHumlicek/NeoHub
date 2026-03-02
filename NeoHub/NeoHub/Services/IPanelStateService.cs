@@ -19,10 +19,14 @@ namespace NeoHub.Services
         IReadOnlyDictionary<byte, ZoneState> GetZones(string sessionId);
         void UpdateZone(string sessionId, ZoneState zone);
 
+        // Signals that initial configuration pull is complete for a session
+        void OnConfigurationComplete(string sessionId);
+
         // Events
         event EventHandler<SessionStateChangedEventArgs>? SessionStateChanged;
         event EventHandler<PartitionStateChangedEventArgs>? PartitionStateChanged;
         event EventHandler<ZoneStateChangedEventArgs>? ZoneStateChanged;
+        event EventHandler<ConfigurationCompleteEventArgs>? ConfigurationComplete;
     }
 
     public class SessionStateChangedEventArgs : EventArgs
@@ -41,5 +45,10 @@ namespace NeoHub.Services
     {
         public required string SessionId { get; init; }
         public required ZoneState Zone { get; init; }
+    }
+
+    public class ConfigurationCompleteEventArgs : EventArgs
+    {
+        public required string SessionId { get; init; }
     }
 }

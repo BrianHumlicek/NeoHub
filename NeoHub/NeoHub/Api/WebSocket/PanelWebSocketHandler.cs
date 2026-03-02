@@ -40,6 +40,7 @@ namespace NeoHub.Api.WebSocket
             _sessionMonitor.SessionsChanged += OnSessionsChanged;
             _panelState.PartitionStateChanged += OnPartitionChanged;
             _panelState.ZoneStateChanged += OnZoneChanged;
+            _panelState.ConfigurationComplete += OnConfigurationComplete;
         }
 
         public async Task HandleConnectionAsync(HttpContext context)
@@ -184,7 +185,7 @@ namespace NeoHub.Api.WebSocket
                             .Select(kvp => new PartitionDto
                             {
                                 PartitionNumber = kvp.Key,
-                                Name = $"Partition {kvp.Key}",
+                                Name = kvp.Value.DisplayName,
                                 Status = kvp.Value.EffectiveStatus
                             })
                             .ToList(),
@@ -192,7 +193,7 @@ namespace NeoHub.Api.WebSocket
                             .Select(kvp => new ZoneDto
                             {
                                 ZoneNumber = kvp.Key,
-                                Name = string.IsNullOrEmpty(kvp.Value.ZoneName) ? $"Zone {kvp.Key}" : kvp.Value.ZoneName,
+                                Name = kvp.Value.DisplayName,
                                 DeviceClass = DetermineDeviceClass(kvp.Value),
                                 Open = kvp.Value.IsOpen,
                                 Partitions = kvp.Value.Partitions
@@ -290,6 +291,13 @@ namespace NeoHub.Api.WebSocket
         {
             _logger.LogDebug("Session list changed, broadcasting full_state to {Count} clients", 
                 _connectedClients.Count(c => c.State == WebSocketState.Open));
+            _ = BroadcastFullStateAsync();
+        }
+
+        private void OnConfigurationComplete(object? sender, ConfigurationCompleteEventArgs e)
+        {
+            _logger.LogInformation("Configuration complete for session {SessionId}, broadcasting full_state to {Count} clients",
+                e.SessionId, _connectedClients.Count(c => c.State == WebSocketState.Open));
             _ = BroadcastFullStateAsync();
         }
 

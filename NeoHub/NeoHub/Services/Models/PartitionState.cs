@@ -6,6 +6,8 @@ namespace NeoHub.Services.Models
     public class PartitionState
     {
         public byte PartitionNumber { get; set; }
+        public string? Name { get; set; }
+        public string DisplayName => Name ?? $"Partition {PartitionNumber}";
         public bool IsReady { get; set; }
         public PartitionStatus Status { get; set; } = PartitionStatus.Unknown;
         public DateTime LastUpdated { get; set; } = DateTime.UtcNow;

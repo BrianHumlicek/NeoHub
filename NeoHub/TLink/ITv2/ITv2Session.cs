@@ -343,8 +343,9 @@ internal sealed class ITv2Session : IITv2Session
             {
                 var cmdSeq = GetNextCommandSequence();
                 cmdReq.CommandSequence = cmdSeq;
-                receiver = new CommandRequestReceiver(senderSeq, cmdSeq, cmdReq.CommandRequest,
-                    MessageFactory.GetMessageType(cmdReq.CommandRequest),
+                var requestCommand = cmdReq.Request.Command;
+                receiver = new CommandRequestReceiver(senderSeq, cmdSeq, requestCommand,
+                    MessageFactory.GetMessageType(requestCommand),
                     msg => _notificationChannel.Writer.TryWrite(msg));
             }
             else if (message is ICommandMessage cmd)

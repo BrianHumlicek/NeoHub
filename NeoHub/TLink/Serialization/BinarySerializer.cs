@@ -162,6 +162,14 @@ namespace DSC.TLink.Serialization
                     case SerializerKind.MultipleMessagePacket:
                         MultipleMessagePacketSerializer.Write(bytes, pp.Property.GetValue(instance) as IMessageData[]);
                         break;
+
+                    case SerializerKind.EmbeddedMessage:
+                    {
+                        var embedded = pp.Property.GetValue(instance) as IMessageData;
+                        if (embedded != null)
+                            bytes.AddRange(MessageFactory.SerializeMessage(embedded));
+                        break;
+                    }
                 }
             }
         }
@@ -271,6 +279,15 @@ namespace DSC.TLink.Serialization
                     case SerializerKind.MultipleMessagePacket:
                         pp.Property.SetValue(instance, MultipleMessagePacketSerializer.Read(bytes, ref offset));
                         break;
+
+                    case SerializerKind.EmbeddedMessage:
+                    {
+                        var embeddedBytes = bytes.Slice(offset);
+                        var embeddedMessage = MessageFactory.DeserializeMessage(embeddedBytes);
+                        offset += embeddedBytes.Length;
+                        pp.Property.SetValue(instance, embeddedMessage);
+                        break;
+                    }
                 }
             }
         }
@@ -549,6 +566,16 @@ namespace DSC.TLink.Serialization
                     Property = property,
                     Kind = SerializerKind.Primitive,
                     TypeCode = tc,
+                };
+            }
+
+            // Embedded IMessageData (serialized as command word + payload)
+            if (typeof(IMessageData).IsAssignableFrom(propType))
+            {
+                return new PropertyPlan
+                {
+                    Property = property,
+                    Kind = SerializerKind.EmbeddedMessage,
                 };
             }
 

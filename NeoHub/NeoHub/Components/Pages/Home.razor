@@ -70,7 +70,7 @@
                             <MudCard Elevation="4" Class="mb-4">
                                 <MudCardHeader>
                                     <CardHeaderContent>
-                                        <MudText Typo="Typo.h5">Partition @partitionNumber</MudText>
+                                        <MudText Typo="Typo.h5">@partition.DisplayName</MudText>
                                     </CardHeaderContent>
                                     <CardHeaderActions>
                                         <MudChip T="string" 
@@ -148,9 +148,16 @@
                                     <MudChip T="string" 
                                              Size="Size.Small" 
                                              Color="@GetZoneColor(zone)"
-                                             Variant="@(zone.IsOpen || zone.IsFaulted || zone.IsTampered ? Variant.Filled : Variant.Outlined)">
+                                             Variant="@(zone.IsOpen || zone.IsFaulted || zone.IsTampered ? Variant.Filled : Variant.Outlined)"
+                                             Style="@(string.IsNullOrEmpty(zone.DisplayNameLine2) ? "" : "height: auto;")">
                                         <MudIcon Icon="@GetZoneIcon(zone)" Size="Size.Small" Class="mr-1" />
-                                        Zone @(zoneNumber)
+                                        <span>
+                                            @zone.DisplayNameLine1
+                                            @if (!string.IsNullOrEmpty(zone.DisplayNameLine2))
+                                            {
+                                                <br />@zone.DisplayNameLine2
+                                            }
+                                        </span>
                                     </MudChip>
                                 </MudTooltip>
                             </MudItem>
@@ -298,22 +305,22 @@
 
     private string GetZoneTooltip(ZoneState zone)
     {
-        var status = new List<string>();
-        
-        if (!string.IsNullOrEmpty(zone.ZoneName))
-            status.Add(zone.ZoneName);
-        
+        var status = new List<string> { zone.DisplayNameLine1 ?? $"Zone {zone.ZoneNumber}" };
+
+        if (!string.IsNullOrEmpty(zone.DisplayNameLine2))
+            status.Add(zone.DisplayNameLine2);
+
         status.Add(zone.IsOpen ? "OPEN" : "CLOSED");
-        
+
         if (zone.IsTampered) status.Add("TAMPERED");
         if (zone.IsFaulted) status.Add("FAULTED");
         if (zone.IsBypassed) status.Add("BYPASSED");
 
         if (zone.Partitions.Any())
             status.Add($"Partitions: {string.Join(",", zone.Partitions)}");
-        
+
         status.Add($"Updated: {zone.LastUpdated.ToLocalTime():HH:mm:ss}");
-        
+
         return string.Join(" | ", status);
     }
 
