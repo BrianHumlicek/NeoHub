@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using DSC.TLink.ITv2;
 
 namespace NeoHub.Services.Settings
 {
@@ -21,5 +22,16 @@ namespace NeoHub.Services.Settings
             GroupName = "Panel Control",
             Order = 1)]
         public string? DefaultAccessCode { get; set; }
+
+        /// <summary>
+        /// TCP port for panel connections (default: 3072)
+        /// </summary>
+        [Display(
+            Name = "Server Port",
+            Description = "TCP port for panel connections",
+            GroupName = "Network",
+            Order = 10)]
+        [Range(1, 65535)]
+        public int ListenPort { get; set; } = ConnectionSettings.DefaultListenPort;
     }
 }

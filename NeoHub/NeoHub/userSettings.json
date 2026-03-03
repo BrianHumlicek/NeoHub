@@ -1,9 +1,6 @@
 {
-  "DSC.TLink": {
-    "IntegrationAccessCodeType1": "12345678",
-    "IntegrationAccessCodeType2": "12345678123456781234567812345678",
-    "IntegrationIdentificationNumber": "",
-    "ListenPort": 3072
+  "PanelConnections": {
+    "Connections": []
   },
   "Diagnostics": {
     "MinimumLogLevel": 2

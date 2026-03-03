@@ -41,13 +41,13 @@ namespace DSC.TLink
 
             try
             {
-                var settings = _serviceProvider.GetRequiredService<ITv2Settings>();
+                var settingsProvider = _serviceProvider.GetRequiredService<IConnectionSettingsProvider>();
                 var loggerFactory = _serviceProvider.GetRequiredService<ILoggerFactory>();
                 var sessionMediator = _serviceProvider.GetRequiredService<SessionMediator>();
                 var sessionManager = _serviceProvider.GetRequiredService<IITv2SessionManager>();
 
                 var result = await ITv2Session.CreateAsync(
-                    connection.Transport, settings, loggerFactory, connection.ConnectionClosed);
+                    connection.Transport, settingsProvider, loggerFactory, connection.ConnectionClosed);
 
                 if (result.IsFailure)
                 {

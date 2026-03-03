@@ -47,4 +47,7 @@ public enum TLinkErrorCode
 
     /// <summary>No active session was found with the requested session ID.</summary>
     SessionNotFound,
+
+    /// <summary>Connection settings are missing or incomplete for the connecting panel.</summary>
+    ConfigurationError,
 }

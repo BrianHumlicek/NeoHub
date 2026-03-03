@@ -41,7 +41,7 @@ namespace DSC.TLink.ITv2;
 internal sealed class ITv2Session : IITv2Session
 {
     private readonly ITLinkTransport _transport;
-    private readonly ITv2Settings _settings;
+    private readonly IConnectionSettingsProvider _settingsProvider;
     private readonly ILogger<ITv2Session> _logger;
     private readonly Channel<IMessageData> _notificationChannel;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
@@ -57,6 +57,7 @@ internal sealed class ITv2Session : IITv2Session
 
     // Encryption state
     private EncryptionHandler? _encryption;
+    private ConnectionSettings? _connectionSettings;
 
     // Reconnection queue flush
     private readonly TaskCompletionSource _queueFlushed = new();
@@ -64,11 +65,11 @@ internal sealed class ITv2Session : IITv2Session
 
     private ITv2Session(
         ITLinkTransport transport,
-        ITv2Settings settings,
+        IConnectionSettingsProvider settingsProvider,
         ILogger<ITv2Session> logger)
     {
         _transport = transport ?? throw new ArgumentNullException(nameof(transport));
-        _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+        _settingsProvider = settingsProvider ?? throw new ArgumentNullException(nameof(settingsProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         _notificationChannel = Channel.CreateUnbounded<IMessageData>(new UnboundedChannelOptions
@@ -96,12 +97,12 @@ internal sealed class ITv2Session : IITv2Session
     /// </summary>
     public static async Task<Result<ITv2Session>> CreateAsync(
         IDuplexPipe pipe,
-        ITv2Settings settings,
+        IConnectionSettingsProvider settingsProvider,
         ILoggerFactory loggerFactory,
         CancellationToken ct = default)
     {
         var transport = new TLinkTransport(pipe, loggerFactory.CreateLogger<TLinkTransport>());
-        var session = new ITv2Session(transport, settings, loggerFactory.CreateLogger<ITv2Session>());
+        var session = new ITv2Session(transport, settingsProvider, loggerFactory.CreateLogger<ITv2Session>());
 
         var handshakeResult = await session.PerformHandshakeAsync(ct);
         if (handshakeResult.IsFailure)
@@ -159,6 +160,17 @@ internal sealed class ITv2Session : IITv2Session
         SessionId = System.Text.Encoding.UTF8.GetString(_transport.DefaultHeader.Span);
         _logger.LogInformation("Connection from Integration Identification Number [851][422]: {SessionId}", SessionId);
         OpenSession openSession = initialPacket.Message.As<OpenSession>();
+
+        // Resolve per-connection settings now that we know the session ID and encryption type
+        _connectionSettings = _settingsProvider.ResolveConnection(SessionId, openSession.EncryptionType);
+        if (_connectionSettings == null)
+            return Result.Fail(TLinkErrorCode.ConfigurationError,
+                $"No valid connection settings for session {SessionId}");
+
+        if (!_connectionSettings.HasEncryptionKey(openSession.EncryptionType))
+            return Result.Fail(TLinkErrorCode.ConfigurationError,
+                $"Session {SessionId} requires {openSession.EncryptionType} encryption but the access code is not configured");
+
         _commandSequence = openSession.CommandSequence;
 
         _logger.LogInformation("Handshake: OpenSession with encryption type {Type}", openSession.EncryptionType);
@@ -478,8 +490,8 @@ internal sealed class ITv2Session : IITv2Session
 
         _encryption = type switch
         {
-            EncryptionType.Type1 => new Type1EncryptionHandler(_settings),
-            EncryptionType.Type2 => new Type2EncryptionHandler(_settings),
+            EncryptionType.Type1 => new Type1EncryptionHandler(_connectionSettings!),
+            EncryptionType.Type2 => new Type2EncryptionHandler(_connectionSettings!),
             _ => throw new NotSupportedException($"Unsupported encryption type: {type}")
         };
 

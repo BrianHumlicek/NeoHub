@@ -4,6 +4,7 @@ using DSC.TLink.ITv2.Messages;
 using MediatR;
 using Microsoft.Extensions.Options;
 using NeoHub.Services.Models;
+using NeoHub.Services.Settings;
 
 namespace NeoHub.Services.Handlers
 {
@@ -17,18 +18,18 @@ namespace NeoHub.Services.Handlers
 
         private readonly IMediator _mediator;
         private readonly IPanelStateService _panelState;
-        private readonly IOptionsMonitor<ITv2Settings> _settings;
+        private readonly IOptionsMonitor<PanelConnectionsSettings> _connectionSettings;
         private readonly ILogger<PanelConfigurationHandler> _logger;
 
         public PanelConfigurationHandler(
             IMediator mediator,
             IPanelStateService panelState,
-            IOptionsMonitor<ITv2Settings> settings,
+            IOptionsMonitor<PanelConnectionsSettings> connectionSettings,
             ILogger<PanelConfigurationHandler> logger)
         {
             _mediator = mediator;
             _panelState = panelState;
-            _settings = settings;
+            _connectionSettings = connectionSettings;
             _logger = logger;
         }
 
@@ -60,7 +61,9 @@ namespace NeoHub.Services.Handlers
                     session.MaxPartitions = capabilities.MaxPartitions;
                 });
 
-                var maxZonesSetting = _settings.CurrentValue.MaxZones;
+                var connectionSettings = _connectionSettings.CurrentValue.Connections
+                    .FirstOrDefault(c => string.Equals(c.SessionId, sessionId, StringComparison.OrdinalIgnoreCase));
+                var maxZonesSetting = connectionSettings?.MaxZones ?? 0;
                 var effectiveZones = maxZonesSetting > 0
                     ? Math.Min(capabilities.MaxZones, maxZonesSetting)
                     : capabilities.MaxZones;
