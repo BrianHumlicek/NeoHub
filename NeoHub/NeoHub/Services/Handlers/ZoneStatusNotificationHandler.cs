@@ -43,8 +43,8 @@ namespace NeoHub.Services.Handlers
             zone.LastUpdated = notification.ReceivedAt;
 
             _logger.LogDebug(
-                "Zone {Zone} is now {Status} (Session: {SessionId}, Associated Partitions: {Partitions})",
-                msg.ZoneNumber, zone.IsOpen ? "OPEN" : "CLOSED", sessionId, string.Join(",", zone.Partitions));
+                "Zone {Zone} is now {Status} (Associated Partitions: {Partitions})",
+                msg.ZoneNumber, zone.IsOpen ? "OPEN" : "CLOSED", string.Join(",", zone.Partitions));
 
             _service.UpdateZone(sessionId, zone);
 

@@ -120,7 +120,7 @@ namespace NeoHub.Services
 
         public void OnConfigurationComplete(string sessionId)
         {
-            _logger.LogInformation("Configuration complete for session {SessionId}", sessionId);
+            _logger.LogInformation("Configuration complete");
             ConfigurationComplete?.Invoke(this, new ConfigurationCompleteEventArgs { SessionId = sessionId });
         }
 

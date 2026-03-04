@@ -21,14 +21,14 @@ namespace NeoHub.Services.Handlers
 
         public Task Handle(SessionConnectedNotification notification, CancellationToken cancellationToken)
         {
-            _logger.LogInformation("Session connected: {SessionId}", notification.SessionId);
+            _logger.LogInformation("Session connected");
             _monitor.NotifyChanged();
             return Task.CompletedTask;
         }
 
         public Task Handle(SessionDisconnectedNotification notification, CancellationToken cancellationToken)
         {
-            _logger.LogInformation("Session disconnected: {SessionId}", notification.SessionId);
+            _logger.LogInformation("Session disconnected");
             _monitor.NotifyChanged();
             return Task.CompletedTask;
         }

@@ -29,8 +29,8 @@ namespace NeoHub.Services
             var code = accessCode ?? _settings.CurrentValue.DefaultAccessCode ?? string.Empty;
 
             _logger.LogInformation(
-                "Arm command: Session={SessionId}, Partition={Partition}, Mode={Mode}, UsingDefaultCode={UsingDefault}",
-                sessionId, partition, mode, string.IsNullOrEmpty(accessCode) && !string.IsNullOrEmpty(_settings.CurrentValue.DefaultAccessCode));
+                "Arm command: Partition={Partition}, Mode={Mode}, UsingDefaultCode={UsingDefault}",
+                partition, mode, string.IsNullOrEmpty(accessCode) && !string.IsNullOrEmpty(_settings.CurrentValue.DefaultAccessCode));
 
             var message = new PartitionArm
             {
@@ -52,8 +52,8 @@ namespace NeoHub.Services
             }
 
             _logger.LogInformation(
-                "Disarm command: Session={SessionId}, Partition={Partition}, UsingDefaultCode={UsingDefault}",
-                sessionId, partition, string.IsNullOrEmpty(accessCode) && !string.IsNullOrEmpty(_settings.CurrentValue.DefaultAccessCode));
+                "Disarm command: Partition={Partition}, UsingDefaultCode={UsingDefault}",
+                partition, string.IsNullOrEmpty(accessCode) && !string.IsNullOrEmpty(_settings.CurrentValue.DefaultAccessCode));
 
             var message = new PartitionDisarm
             {
@@ -85,7 +85,7 @@ namespace NeoHub.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error sending command to session {SessionId}", sessionId);
+                _logger.LogError(ex, "Error sending command");
                 return PanelCommandResult.Error(ex.Message);
             }
         }

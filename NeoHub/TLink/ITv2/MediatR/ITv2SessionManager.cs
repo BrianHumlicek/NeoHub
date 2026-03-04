@@ -31,13 +31,13 @@ namespace DSC.TLink.ITv2.MediatR
         {
             if (_sessions.TryAdd(sessionId, session))
             {
-                _logger.LogInformation("Registered session {SessionId}. Active sessions: {Count}",
-                    sessionId, _sessions.Count);
+                _logger.LogInformation("Session registered. Active sessions: {Count}",
+                    _sessions.Count);
                 PublishLifecycleNotification(new SessionConnectedNotification(sessionId));
             }
             else
             {
-                _logger.LogWarning("Session {SessionId} already registered", sessionId);
+                _logger.LogWarning("Session already registered");
             }
         }
 
@@ -45,8 +45,8 @@ namespace DSC.TLink.ITv2.MediatR
         {
             if (_sessions.TryRemove(sessionId, out _))
             {
-                _logger.LogInformation("Unregistered session {SessionId}. Active sessions: {Count}",
-                    sessionId, _sessions.Count);
+                _logger.LogInformation("Session unregistered. Active sessions: {Count}",
+                    _sessions.Count);
                 PublishLifecycleNotification(new SessionDisconnectedNotification(sessionId));
             }
         }
