@@ -1,0 +1,414 @@
+@page "/connections"
+@using NeoHub.Services
+@using NeoHub.Services.Models
+@using NeoHub.Services.Settings
+@using NeoHub.Services.Diagnostics
+@using DSC.TLink.ITv2
+@using DSC.TLink.ITv2.MediatR
+@using Microsoft.Extensions.Options
+@inject IOptionsMonitor<PanelConnectionsSettings> ConnectionSettings
+@inject IITv2SessionManager SessionManager
+@inject IPanelStateService PanelState
+@inject ISessionMonitor SessionMonitor
+@inject IDiagnosticsLogService LogService
+@inject ISettingsPersistenceService PersistenceService
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+<PageTitle>Connections</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="mt-4">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+        <MudText Typo="Typo.h4">
+            <MudIcon Icon="@Icons.Material.Filled.Cable" Class="mr-2" Style="vertical-align: middle;" />
+            Connections
+        </MudText>
+        <MudSpacer />
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Add"
+                   OnClick="AddConnection">
+            Add Connection
+        </MudButton>
+    </MudStack>
+
+    @if (!connections.Any())
+    {
+        <MudAlert Severity="Severity.Info" Class="mt-4">
+            No connections configured. When a panel connects, a placeholder entry will be created automatically.
+        </MudAlert>
+    }
+    else
+    {
+        <MudStack Spacing="4" Class="mt-4">
+            @foreach (var conn in connections)
+            {
+                var isConnected = activeSessions.Contains(conn.SessionId);
+                var session = isConnected ? PanelState.GetSession(conn.SessionId) : null;
+                var status = GetConnectionStatus(conn, isConnected);
+
+                <MudCard Elevation="2" Outlined="true">
+                    <MudCardHeader>
+                        <CardHeaderAvatar>
+                            <MudAvatar Color="@status.Color" Size="Size.Small">
+                                <MudIcon Icon="@status.Icon" Size="Size.Small" />
+                            </MudAvatar>
+                        </CardHeaderAvatar>
+                        <CardHeaderContent>
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                                <MudText Typo="Typo.h6">@conn.SessionId</MudText>
+                                <MudChip T="string" Size="Size.Small" Color="@status.Color" Variant="Variant.Outlined">
+                                    @status.Label
+                                </MudChip>
+                            </MudStack>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                @GetConnectionSummary(conn, session)
+                            </MudText>
+                        </CardHeaderContent>
+                        <CardHeaderActions>
+                            <MudTooltip Text="View Logs">
+                                <MudIconButton Icon="@Icons.Material.Filled.Article"
+                                               Color="Color.Default"
+                                               OnClick="@(() => ToggleLogs(conn.SessionId))" />
+                            </MudTooltip>
+                            <MudTooltip Text="Settings">
+                                <MudIconButton Icon="@Icons.Material.Filled.Settings"
+                                               Color="Color.Default"
+                                               OnClick="@(() => ToggleSettings(conn.SessionId))" />
+                            </MudTooltip>
+                        </CardHeaderActions>
+                    </MudCardHeader>
+
+                    @if (expandedSettings == conn.SessionId)
+                    {
+                        <MudCardContent>
+                            <MudDivider Class="mb-3" />
+                            <MudText Typo="Typo.subtitle2" Class="mb-2">Connection Settings</MudText>
+                            <MudGrid Spacing="2">
+                                <MudItem xs="12" sm="6">
+                                    @{ var isNewConnection = string.IsNullOrEmpty(conn.SessionId); }
+                                    <MudTextField T="string"
+                                                  Label="Session ID"
+                                                  Value="@conn.SessionId"
+                                                  ValueChanged="@(v => conn.SessionId = v ?? "")"
+                                                  ReadOnly="@(!isNewConnection)"
+                                                  HelperText="Integration Identification Number [851][422]"
+                                                  Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense" />
+                                </MudItem>
+                                <MudItem xs="12" sm="6">
+                                    <MudSelect T="DSC.TLink.ITv2.Enumerations.EncryptionType"
+                                               Label="Encryption Type"
+                                               @bind-Value="conn.EncryptionType"
+                                               HelperText="Encryption type negotiated by the panel during handshake"
+                                               Variant="Variant.Outlined"
+                                               Margin="Margin.Dense">
+                                        <MudSelectItem T="DSC.TLink.ITv2.Enumerations.EncryptionType"
+                                                       Value="DSC.TLink.ITv2.Enumerations.EncryptionType.Unknown">Unknown</MudSelectItem>
+                                        <MudSelectItem T="DSC.TLink.ITv2.Enumerations.EncryptionType"
+                                                       Value="DSC.TLink.ITv2.Enumerations.EncryptionType.Type1">Type 1</MudSelectItem>
+                                        <MudSelectItem T="DSC.TLink.ITv2.Enumerations.EncryptionType"
+                                                       Value="DSC.TLink.ITv2.Enumerations.EncryptionType.Type2">Type 2</MudSelectItem>
+                                    </MudSelect>
+                                </MudItem>
+                                <MudItem xs="12" sm="6">
+                                    @{ var showType1 = visibleFields.Contains($"{conn.SessionId}:Type1"); }
+                                    <MudTextField T="string"
+                                                  Label="Type 1 Access Code"
+                                                  Value="@(conn.IntegrationAccessCodeType1 ?? "")"
+                                                  ValueChanged="@(v => conn.IntegrationAccessCodeType1 = string.IsNullOrWhiteSpace(v) ? null : v)"
+                                                  HelperText="8-digit integration code for Type 1 encryption [851][423,450,477,504]"
+                                                  Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense"
+                                                  InputType="@(showType1 ? InputType.Text : InputType.Password)"
+                                                  Adornment="Adornment.End"
+                                                  AdornmentIcon="@(showType1 ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                                                  OnAdornmentClick="@(() => ToggleFieldVisibility($"{conn.SessionId}:Type1"))" />
+                                </MudItem>
+                                <MudItem xs="12" sm="6">
+                                    @{ var showType2 = visibleFields.Contains($"{conn.SessionId}:Type2"); }
+                                    <MudTextField T="string"
+                                                  Label="Type 2 Access Code"
+                                                  Value="@(conn.IntegrationAccessCodeType2 ?? "")"
+                                                  ValueChanged="@(v => conn.IntegrationAccessCodeType2 = string.IsNullOrWhiteSpace(v) ? null : v)"
+                                                  HelperText="32-character hex string for Type 2 encryption [851][700,701,702,703]"
+                                                  Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense"
+                                                  InputType="@(showType2 ? InputType.Text : InputType.Password)"
+                                                  Adornment="Adornment.End"
+                                                  AdornmentIcon="@(showType2 ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                                                  OnAdornmentClick="@(() => ToggleFieldVisibility($"{conn.SessionId}:Type2"))" />
+                                </MudItem>
+                                <MudItem xs="12" sm="6">
+                                    <MudNumericField T="int"
+                                                     Label="Max Zones"
+                                                     @bind-Value="conn.MaxZones"
+                                                     Min="0" Max="256"
+                                                     HelperText="Limit how many zones to pull (0 = use panel max)"
+                                                     Variant="Variant.Outlined"
+                                                     Margin="Margin.Dense" />
+                                </MudItem>
+                            </MudGrid>
+                            <MudStack Row="true" Spacing="2" Class="mt-3">
+                                <MudButton Variant="Variant.Filled"
+                                           Color="Color.Primary"
+                                           OnClick="SaveSettingsAsync"
+                                           Disabled="@saving">
+                                    @if (saving)
+                                    {
+                                        <MudProgressCircular Class="mr-2" Size="Size.Small" Indeterminate="true" />
+                                    }
+                                    Save
+                                </MudButton>
+                                <MudSpacer />
+                                <MudButton Variant="Variant.Outlined"
+                                           Color="Color.Error"
+                                           StartIcon="@Icons.Material.Filled.Delete"
+                                           OnClick="@(() => DeleteConnection(conn))">
+                                    Delete Connection
+                                </MudButton>
+                            </MudStack>
+                        </MudCardContent>
+                    }
+
+                    @if (expandedLogs == conn.SessionId)
+                    {
+                        <MudCardContent>
+                            <MudDivider Class="mb-3" />
+                            <MudText Typo="Typo.subtitle2" Class="mb-2">Recent Logs</MudText>
+                            @{
+                                var sessionLogs = GetSessionLogs(conn.SessionId);
+                            }
+                            @if (!sessionLogs.Any())
+                            {
+                                <MudText Typo="Typo.body2" Color="Color.Secondary">No log entries for this connection.</MudText>
+                            }
+                            else
+                            {
+                                <MudPaper Style="max-height: 300px; overflow-y: auto;" Outlined="true" Class="pa-0">
+                                    <MudTable Items="@sessionLogs" Dense="true" Hover="true" FixedHeader="true" Height="300px" Elevation="0">
+                                        <HeaderContent>
+                                            <MudTh Style="width: 120px;">Time</MudTh>
+                                            <MudTh Style="width: 80px;">Level</MudTh>
+                                            <MudTh>Message</MudTh>
+                                        </HeaderContent>
+                                        <RowTemplate>
+                                            <MudTd>
+                                                <MudText Typo="Typo.caption">@context.Timestamp.ToLocalTime().ToString("HH:mm:ss.fff")</MudText>
+                                            </MudTd>
+                                            <MudTd>
+                                                <MudChip T="string" Size="Size.Small" Color="@GetLogLevelColor(context.LogLevel)">@context.LogLevel</MudChip>
+                                            </MudTd>
+                                            <MudTd>
+                                                <MudText Style="font-family: monospace; font-size: 0.85em; white-space: pre-wrap;">@context.Message</MudText>
+                                            </MudTd>
+                                        </RowTemplate>
+                                    </MudTable>
+                                </MudPaper>
+                                <MudButton Variant="Variant.Text"
+                                           Color="Color.Primary"
+                                           Size="Size.Small"
+                                           Class="mt-1"
+                                           OnClick="@(() => Navigation.NavigateTo("/diagnostics"))">
+                                    View full diagnostics →
+                                </MudButton>
+                            }
+                        </MudCardContent>
+                    }
+                </MudCard>
+            }
+        </MudStack>
+    }
+</MudContainer>
+
+@code {
+    private List<ConnectionSettings> connections = new();
+    private HashSet<string> activeSessions = new();
+    private HashSet<string> visibleFields = new();
+    private string? expandedSettings;
+    private string? expandedLogs;
+    private bool saving;
+    private Timer? _refreshTimer;
+
+    protected override void OnInitialized()
+    {
+        RefreshData();
+        SessionMonitor.SessionsChanged += OnSessionsChanged;
+        UpdateRefreshTimer();
+    }
+
+    private void RefreshData()
+    {
+        connections = ConnectionSettings.CurrentValue.Connections.ToList();
+        activeSessions = SessionManager.GetActiveSessions().ToHashSet();
+    }
+
+    private void OnSessionsChanged()
+    {
+        InvokeAsync(() =>
+        {
+            RefreshData();
+            UpdateRefreshTimer();
+            StateHasChanged();
+        });
+    }
+
+    private void UpdateRefreshTimer()
+    {
+        if (activeSessions.Any())
+            _refreshTimer ??= new Timer(_ => InvokeAsync(StateHasChanged), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+        else
+        {
+            _refreshTimer?.Dispose();
+            _refreshTimer = null;
+        }
+    }
+
+    private void ToggleSettings(string sessionId)
+    {
+        expandedSettings = expandedSettings == sessionId ? null : sessionId;
+        expandedLogs = null;
+    }
+
+    private void ToggleLogs(string sessionId)
+    {
+        expandedLogs = expandedLogs == sessionId ? null : sessionId;
+        expandedSettings = null;
+    }
+
+    private void ToggleFieldVisibility(string fieldKey)
+    {
+        if (!visibleFields.Remove(fieldKey))
+            visibleFields.Add(fieldKey);
+    }
+
+    private void AddConnection()
+    {
+        var conn = new ConnectionSettings();
+        ConnectionSettings.CurrentValue.Connections.Add(conn);
+        RefreshData();
+        expandedSettings = conn.SessionId;
+        expandedLogs = null;
+    }
+
+    private async Task DeleteConnection(ConnectionSettings conn)
+    {
+        if (activeSessions.Contains(conn.SessionId))
+            await SessionManager.DisconnectSessionAsync(conn.SessionId);
+
+        ConnectionSettings.CurrentValue.Connections.Remove(conn);
+        expandedSettings = null;
+        expandedLogs = null;
+
+        try
+        {
+            await PersistenceService.SaveSettingsAsync(
+                typeof(PanelConnectionsSettings), ConnectionSettings.CurrentValue);
+            Snackbar.Add($"Connection {(string.IsNullOrEmpty(conn.SessionId) ? "(new)" : conn.SessionId)} deleted", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to delete: {ex.Message}", Severity.Error);
+        }
+
+        RefreshData();
+    }
+
+    private async Task SaveSettingsAsync()
+    {
+        saving = true;
+        try
+        {
+            await PersistenceService.SaveSettingsAsync(
+                typeof(PanelConnectionsSettings), ConnectionSettings.CurrentValue);
+            Snackbar.Add("Connection settings saved", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to save: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private List<DiagnosticsLogEntry> GetSessionLogs(string sessionId)
+    {
+        return LogService.GetLogs()
+            .Where(l => string.Equals(l.SessionId, sessionId, StringComparison.OrdinalIgnoreCase))
+            .TakeLast(50)
+            .ToList();
+    }
+
+    private (Color Color, string Icon, string Label) GetConnectionStatus(ConnectionSettings conn, bool isConnected)
+    {
+        if (isConnected)
+            return (Color.Success, Icons.Material.Filled.CheckCircle, "Connected");
+
+        if (!conn.IsComplete)
+            return (Color.Warning, Icons.Material.Filled.Warning, "Needs Configuration");
+
+        return (Color.Default, Icons.Material.Filled.LinkOff, "Disconnected");
+    }
+
+    private string GetConnectionSummary(ConnectionSettings conn, SessionState? session)
+    {
+        var parts = new List<string>();
+
+        if (conn.EncryptionType != DSC.TLink.ITv2.Enumerations.EncryptionType.Unknown)
+            parts.Add($"{conn.EncryptionType} Encryption");
+
+        if (session != null)
+        {
+            if (session.Partitions.Any())
+                parts.Add($"{session.Partitions.Count} partition{(session.Partitions.Count != 1 ? "s" : "")}");
+            if (session.Zones.Any())
+                parts.Add($"{session.Zones.Count} zones");
+
+            parts.Add($"Up {FormatDuration(DateTime.UtcNow - session.ConnectedAt)}");
+
+            var lastActivity = DateTime.UtcNow - session.LastMessageAt;
+            parts.Add(lastActivity.TotalSeconds < 5 ? "Active now" : $"Last activity {FormatDuration(lastActivity)} ago");
+        }
+        else if (!conn.IsComplete)
+        {
+            parts.Add(GetConfigurationHint(conn));
+        }
+
+        return parts.Any() ? string.Join(" · ", parts) : "No details available";
+    }
+
+    private static string FormatDuration(TimeSpan duration)
+    {
+        if (duration.TotalSeconds < 60) return $"{(int)duration.TotalSeconds}s";
+        if (duration.TotalMinutes < 60) return $"{(int)duration.TotalMinutes}m";
+        if (duration.TotalHours < 24) return $"{(int)duration.TotalHours}h {duration.Minutes}m";
+        return $"{(int)duration.TotalDays}d {duration.Hours}h";
+    }
+
+    private string GetConfigurationHint(ConnectionSettings conn)
+    {
+        if (!conn.HasEncryptionKey(conn.EncryptionType))
+            return $"Missing {conn.EncryptionType} access code";
+        return "Incomplete configuration";
+    }
+
+    private Color GetLogLevelColor(LogLevel level) => level switch
+    {
+        LogLevel.Trace => Color.Default,
+        LogLevel.Debug => Color.Default,
+        LogLevel.Information => Color.Info,
+        LogLevel.Warning => Color.Warning,
+        LogLevel.Error => Color.Error,
+        LogLevel.Critical => Color.Error,
+        _ => Color.Default
+    };
+
+    public void Dispose()
+    {
+        _refreshTimer?.Dispose();
+        SessionMonitor.SessionsChanged -= OnSessionsChanged;
+    }
+}

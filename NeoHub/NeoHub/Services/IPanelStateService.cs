@@ -8,6 +8,7 @@ namespace NeoHub.Services
         SessionState? GetSession(string sessionId);
         IReadOnlyDictionary<string, SessionState> GetAllSessions();
         void UpdateSession(string sessionId, Action<SessionState> update);
+        void RemoveSession(string sessionId);
 
         // Partition operations (partition belongs to session)
         PartitionState? GetPartition(string sessionId, byte partitionNumber);

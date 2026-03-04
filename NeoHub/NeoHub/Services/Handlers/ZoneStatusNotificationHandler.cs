@@ -29,22 +29,20 @@ namespace NeoHub.Services.Handlers
             var msg = notification.MessageData;
             var sessionId = notification.SessionId;
 
-            // Calculate which partition(s) this zone belongs to (zones 1-64 = partition 1, etc.)
-            byte calculatedPartition = (byte)Math.Max(1, (msg.ZoneNumber - 1) / 64 + 1);
-
             var zone = _service.GetZone(sessionId, msg.ZoneNumber) 
-                ?? new ZoneState 
-                { 
-                    ZoneNumber = msg.ZoneNumber,
-                    Partitions = new List<byte> { calculatedPartition } // Default association
-                };
+                ?? new ZoneState { ZoneNumber = msg.ZoneNumber };
 
             zone.IsOpen = msg.Status == NotificationLifestyleZoneStatus.LifeStyleZoneStatusCode.Open;
             zone.LastUpdated = notification.ReceivedAt;
 
+            // TODO: No protocol-level way to get zone-partition mapping yet.
+            // For now, assign all zones to partition 1.
+            if (!zone.Partitions.Any())
+                zone.Partitions.Add(1);
+
             _logger.LogDebug(
-                "Zone {Zone} is now {Status} (Session: {SessionId}, Associated Partitions: {Partitions})",
-                msg.ZoneNumber, zone.IsOpen ? "OPEN" : "CLOSED", sessionId, string.Join(",", zone.Partitions));
+                "Zone {Zone} is now {Status} (Associated Partitions: {Partitions})",
+                msg.ZoneNumber, zone.IsOpen ? "OPEN" : "CLOSED", string.Join(",", zone.Partitions));
 
             _service.UpdateZone(sessionId, zone);
 

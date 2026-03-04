@@ -42,13 +42,20 @@ namespace NeoHub.Services.Settings
                 try
                 {
                     var types = assembly.GetTypes()
-                        .Where(t => t.IsClass && !t.IsAbstract && HasOptionsRegistration(serviceProvider, t));
+                        .Where(t => t.IsClass && !t.IsAbstract
+                            && t.GetCustomAttribute<DisplayAttribute>() != null
+                            && HasOptionsRegistration(serviceProvider, t));
 
                     foreach (var type in types)
                     {
                         try
                         {
                             var metadata = ExtractMetadata(type);
+                            if (metadata == null)
+                            {
+                                _log.LogDebug("Skipping settings type {Type} (no renderable properties)", type.Name);
+                                continue;
+                            }
                             _discoveredSettings.Add(metadata);
                             _log.LogInformation("Discovered settings: {Section} ({Type})", 
                                 metadata.SectionName, type.Name);
@@ -83,7 +90,7 @@ namespace NeoHub.Services.Settings
             }
         }
 
-        private SettingsSectionMetadata ExtractMetadata(Type settingsType)
+        private SettingsSectionMetadata? ExtractMetadata(Type settingsType)
         {
             // Try to find SectionName from a const field
             var sectionNameField = settingsType.GetField("SectionName", BindingFlags.Public | BindingFlags.Static);
@@ -101,18 +108,24 @@ namespace NeoHub.Services.Settings
                 GroupName = typeDisplay?.GroupName
             };
 
-            // Extract properties
+            // Extract properties — only include types the generic Settings page can render
             var properties = settingsType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                .Where(p => p.CanRead && p.CanWrite)
+                .Where(p => p.CanRead && p.CanWrite && IsRenderableType(p.PropertyType))
                 .Select(ExtractPropertyMetadata)
                 .OrderBy(p => p.Order)
                 .ThenBy(p => p.DisplayName)
                 .ToList();
 
+            if (properties.Count == 0)
+                return null;
+
             metadata.Properties.AddRange(properties);
 
             return metadata;
         }
+
+        private static bool IsRenderableType(Type type) =>
+            type == typeof(string) || type == typeof(int) || type == typeof(bool) || type.IsEnum;
 
         private SettingsPropertyMetadata ExtractPropertyMetadata(PropertyInfo property)
         {

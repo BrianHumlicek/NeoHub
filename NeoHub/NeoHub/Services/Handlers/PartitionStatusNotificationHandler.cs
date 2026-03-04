@@ -30,8 +30,8 @@ namespace NeoHub.Services.Handlers
             var msg = notification.MessageData;
             var sessionId = notification.SessionId;
 
-            _logger.LogDebug("Partition {Partition} status: {Status} (Session: {SessionId})",
-                msg.PartitionNumber, msg.Status, sessionId);
+            _logger.LogDebug("Partition {Partition} status: {Status}",
+                msg.PartitionNumber, msg.Status);
 
             var partition = _service.GetPartition(sessionId, msg.PartitionNumber) 
                 ?? new PartitionState { PartitionNumber = msg.PartitionNumber };

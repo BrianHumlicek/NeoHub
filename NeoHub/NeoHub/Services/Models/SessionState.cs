@@ -13,6 +13,16 @@ namespace NeoHub.Services.Models
         public Dictionary<byte, ZoneState> Zones { get; } = new();
 
         /// <summary>
+        /// When this session was established.
+        /// </summary>
+        public DateTime ConnectedAt { get; set; } = DateTime.UtcNow;
+
+        /// <summary>
+        /// When the last message (send or receive) occurred on this session.
+        /// </summary>
+        public DateTime LastMessageAt { get; set; } = DateTime.UtcNow;
+
+        /// <summary>
         /// The panel's reported date/time at the moment of the last broadcast.
         /// </summary>
         public DateTime? PanelDateTime { get; set; }

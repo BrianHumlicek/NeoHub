@@ -4,6 +4,7 @@ using DSC.TLink.ITv2.Messages;
 using MediatR;
 using Microsoft.Extensions.Options;
 using NeoHub.Services.Models;
+using NeoHub.Services.Settings;
 
 namespace NeoHub.Services.Handlers
 {
@@ -17,25 +18,25 @@ namespace NeoHub.Services.Handlers
 
         private readonly IMediator _mediator;
         private readonly IPanelStateService _panelState;
-        private readonly IOptionsMonitor<ITv2Settings> _settings;
+        private readonly IOptionsMonitor<PanelConnectionsSettings> _connectionSettings;
         private readonly ILogger<PanelConfigurationHandler> _logger;
 
         public PanelConfigurationHandler(
             IMediator mediator,
             IPanelStateService panelState,
-            IOptionsMonitor<ITv2Settings> settings,
+            IOptionsMonitor<PanelConnectionsSettings> connectionSettings,
             ILogger<PanelConfigurationHandler> logger)
         {
             _mediator = mediator;
             _panelState = panelState;
-            _settings = settings;
+            _connectionSettings = connectionSettings;
             _logger = logger;
         }
 
         public async Task Handle(SessionConnectedNotification notification, CancellationToken cancellationToken)
         {
             var sessionId = notification.SessionId;
-            _logger.LogInformation("Starting panel configuration pull for session {SessionId}", sessionId);
+            _logger.LogInformation("Starting panel configuration pull");
 
             try
             {
@@ -46,13 +47,13 @@ namespace NeoHub.Services.Handlers
 
                 if (capabilities == null)
                 {
-                    _logger.LogWarning("Failed to get system capabilities for session {SessionId}, aborting config pull", sessionId);
+                    _logger.LogWarning("Failed to get system capabilities, aborting config pull");
                     return;
                 }
 
                 _logger.LogInformation(
-                    "Session {SessionId} capabilities: {MaxZones} zones, {MaxPartitions} partitions",
-                    sessionId, capabilities.MaxZones, capabilities.MaxPartitions);
+                    "Panel capabilities: {MaxZones} zones, {MaxPartitions} partitions",
+                    capabilities.MaxZones, capabilities.MaxPartitions);
 
                 _panelState.UpdateSession(sessionId, session =>
                 {
@@ -60,14 +61,16 @@ namespace NeoHub.Services.Handlers
                     session.MaxPartitions = capabilities.MaxPartitions;
                 });
 
-                var maxZonesSetting = _settings.CurrentValue.MaxZones;
+                var connectionSettings = _connectionSettings.CurrentValue.Connections
+                    .FirstOrDefault(c => string.Equals(c.SessionId, sessionId, StringComparison.OrdinalIgnoreCase));
+                var maxZonesSetting = connectionSettings?.MaxZones ?? 0;
                 var effectiveZones = maxZonesSetting > 0
                     ? Math.Min(capabilities.MaxZones, maxZonesSetting)
                     : capabilities.MaxZones;
 
                 _logger.LogInformation(
-                    "Session {SessionId}: using {EffectiveZones} zones (panel max: {PanelMax}, setting: {Setting})",
-                    sessionId, effectiveZones, capabilities.MaxZones, maxZonesSetting > 0 ? maxZonesSetting : "unlimited");
+                    "Using {EffectiveZones} zones (panel max: {PanelMax}, setting: {Setting})",
+                    effectiveZones, capabilities.MaxZones, maxZonesSetting > 0 ? maxZonesSetting : "unlimited");
 
                 await PullZoneLabelsAsync(sessionId, effectiveZones, cancellationToken);
                 await PullPartitionStatusAsync(sessionId, capabilities.MaxPartitions, cancellationToken);
@@ -75,15 +78,15 @@ namespace NeoHub.Services.Handlers
                 await PullZoneStatusAsync(sessionId, effectiveZones, cancellationToken);
 
                 _panelState.OnConfigurationComplete(sessionId);
-                _logger.LogInformation("Panel configuration pull complete for session {SessionId}", sessionId);
+                _logger.LogInformation("Panel configuration pull complete");
             }
             catch (OperationCanceledException)
             {
-                _logger.LogWarning("Panel configuration pull cancelled for session {SessionId}", sessionId);
+                _logger.LogWarning("Panel configuration pull cancelled");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error during panel configuration pull for session {SessionId}", sessionId);
+                _logger.LogError(ex, "Error during panel configuration pull");
             }
         }
 
@@ -103,12 +106,12 @@ namespace NeoHub.Services.Handlers
 
                 if (response == null)
                 {
-                    _logger.LogWarning("Failed to get zone labels {Start}-{End} for session {SessionId}",
-                        start, end, sessionId);
+                    _logger.LogWarning("Failed to get zone labels {Start}-{End}",
+                        start, end);
                 }
             }
 
-            _logger.LogInformation("Pulled zone labels for session {SessionId}", sessionId);
+            _logger.LogInformation("Pulled zone labels");
         }
 
         private async Task PullPartitionLabelsAsync(string sessionId, int maxPartitions, CancellationToken ct)
@@ -127,12 +130,12 @@ namespace NeoHub.Services.Handlers
 
                 if (response == null)
                 {
-                    _logger.LogWarning("Failed to get partition labels {Start}-{End} for session {SessionId}",
-                        start, end, sessionId);
+                    _logger.LogWarning("Failed to get partition labels {Start}-{End}",
+                        start, end);
                 }
             }
 
-            _logger.LogInformation("Pulled partition labels for session {SessionId}", sessionId);
+            _logger.LogInformation("Pulled partition labels");
         }
 
         private async Task PullPartitionStatusAsync(string sessionId, int maxPartitions, CancellationToken ct)
@@ -149,8 +152,8 @@ namespace NeoHub.Services.Handlers
 
                 if (response == null)
                 {
-                    _logger.LogWarning("Failed to get status for partition {Partition} session {SessionId}",
-                        partition, sessionId);
+                    _logger.LogWarning("Failed to get status for partition {Partition}",
+                        partition);
                     continue;
                 }
 
@@ -208,11 +211,11 @@ namespace NeoHub.Services.Handlers
                 state.LastUpdated = DateTime.UtcNow;
                 _panelState.UpdatePartition(sessionId, state);
 
-                _logger.LogDebug("Partition {Partition} Status1=0x{S1:X} Status2=0x{S2:X} → {Status}, IsReady={IsReady} (Session: {SessionId})",
-                    partitionNumber, (byte)s1, (byte)s2, state.Status, state.IsReady, sessionId);
+                _logger.LogDebug("Partition {Partition} Status1=0x{S1:X} Status2=0x{S2:X} → {Status}, IsReady={IsReady}",
+                    partitionNumber, (byte)s1, (byte)s2, state.Status, state.IsReady);
             }
 
-            _logger.LogInformation("Pulled initial partition status for session {SessionId}", sessionId);
+            _logger.LogInformation("Pulled initial partition status");
         }
 
         private async Task PullZoneStatusAsync(string sessionId, int maxZones, CancellationToken ct)
@@ -227,7 +230,7 @@ namespace NeoHub.Services.Handlers
 
             if (response == null)
             {
-                _logger.LogWarning("Failed to get zone status for session {SessionId}", sessionId);
+                _logger.LogWarning("Failed to get zone status");
                 return;
             }
 
@@ -245,11 +248,16 @@ namespace NeoHub.Services.Handlers
                 zone.IsBypassed = status.HasFlag(ModuleZoneStatus.ZoneStatusEnum.Bypass);
                 zone.LastUpdated = DateTime.UtcNow;
 
+                // TODO: No protocol-level way to get zone-partition mapping yet.
+                // For now, assign all zones to partition 1.
+                if (!zone.Partitions.Any())
+                    zone.Partitions.Add(1);
+
                 _panelState.UpdateZone(sessionId, zone);
             }
 
-            _logger.LogInformation("Pulled initial status for {Count} zones for session {SessionId}",
-                response.ZoneStatusBytes.Length, sessionId);
+            _logger.LogInformation("Pulled initial status for {Count} zones",
+                response.ZoneStatusBytes.Length);
         }
 
         private async Task<T?> RequestAsync<T>(string sessionId, IMessageData request, CancellationToken ct)
@@ -263,8 +271,8 @@ namespace NeoHub.Services.Handlers
 
             if (!response.Success)
             {
-                _logger.LogWarning("Command {Command} failed for session {SessionId}: {Error}",
-                    typeof(T).Name, sessionId, response.ErrorMessage);
+                _logger.LogWarning("Command {Command} failed: {Error}",
+                    typeof(T).Name, response.ErrorMessage);
                 return null;
             }
 

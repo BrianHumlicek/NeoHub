@@ -15,6 +15,9 @@ namespace NeoHub
         {
             var builder = WebApplication.CreateBuilder(args);
 
+            // Migrate legacy settings format if needed (safe to remove once all deployments are migrated)
+            SettingsMigration.MigrateIfNeeded(builder.Environment.ContentRootPath);
+
             // Load user settings from persist folder (overrides appsettings.json)
             // AddJsonFile resolves relative paths from ContentRootPath
             builder.Configuration.AddJsonFile(
@@ -23,8 +26,8 @@ namespace NeoHub
                 reloadOnChange: true);
 
             // Register settings
-            builder.Services.Configure<ITv2Settings>(
-                builder.Configuration.GetSection(ITv2Settings.SectionName));
+            builder.Services.Configure<PanelConnectionsSettings>(
+                builder.Configuration.GetSection(PanelConnectionsSettings.SectionName));
             builder.Services.Configure<DiagnosticsSettings>(
                 builder.Configuration.GetSection(DiagnosticsSettings.SectionName));
             builder.Services.Configure<ApplicationSettings>(
@@ -62,12 +65,31 @@ namespace NeoHub
             builder.Services.AddSingleton<IPanelStateService, PanelStateService>();
             builder.Services.AddSingleton<IPanelCommandService, PanelCommandService>();
             builder.Services.AddSingleton<ISessionMonitor, SessionMonitor>();
+            builder.Services.AddSingleton<IConnectionSettingsProvider, ConnectionSettingsProvider>();
 
             // WebSocket API
             builder.Services.AddSingleton<PanelWebSocketHandler>();
 
             // TLink infrastructure
-            builder.UseITv2();
+            var listenPort = builder.Configuration.GetValue(
+                $"{ApplicationSettings.SectionName}:{nameof(ApplicationSettings.ListenPort)}",
+                ConnectionSettings.DefaultListenPort);
+            builder.UseITv2(listenPort);
+
+            // Configure Kestrel — web UI ports
+            builder.WebHost.ConfigureKestrel((context, options) =>
+            {
+                var httpPort = context.Configuration.GetValue("HttpPort", 8080);
+                var httpsPort = context.Configuration.GetValue("HttpsPort", 8443);
+                var enableHttps = context.Configuration.GetValue("EnableHttps", false);
+
+                options.ListenAnyIP(httpPort);
+
+                if (enableHttps)
+                {
+                    options.ListenAnyIP(httpsPort, listenOptions => listenOptions.UseHttps());
+                }
+            });
 
             // Add MudBlazor services
             builder.Services.AddMudServices();

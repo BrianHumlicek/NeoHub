@@ -13,87 +13,103 @@
 @inject NavigationManager Navigation
 @inject ISnackbar Snackbar
 @inject IOptionsMonitor<ApplicationSettings> Settings
+@inject IOptionsMonitor<PanelConnectionsSettings> ConnectionSettings
 @implements IDisposable
 
 <PageTitle>Security Panel Status</PageTitle>
 
 <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
-    <MudText Typo="Typo.h4" GutterBottom="true">Security Panel Status</MudText>
+    <MudText Typo="Typo.h4" GutterBottom="true">Security Panel Overview</MudText>
 
-    @if (!activeSessions.Any())
+    @if (!configuredConnections.Any() && !activeSessions.Any())
     {
         <MudAlert Severity="Severity.Warning" Class="mt-4">
-            <MudText>No active panel connections. Waiting for panel to connect...</MudText>
+            <MudText>No panel connections configured. Waiting for a panel to connect...</MudText>
         </MudAlert>
     }
     else
     {
-        <MudSelect T="string" Label="Active Session" @bind-Value="selectedSessionId" Class="mb-4">
-            @foreach (var sessionId in activeSessions)
-            {
-                <MudSelectItem T="string" Value="@sessionId">@sessionId</MudSelectItem>
-            }
-        </MudSelect>
-
-        @if (!string.IsNullOrEmpty(selectedSessionId))
+        @foreach (var sessionId in allSessionIds)
         {
-            var session = PanelState.GetSession(selectedSessionId);
+            var isConnected = activeSessions.Contains(sessionId);
+            var session = isConnected ? PanelState.GetSession(sessionId) : null;
 
-            @if (session == null)
-            {
-                <MudAlert Severity="Severity.Info" Class="mt-4">
-                    <MudText>Waiting for session data...</MudText>
-                </MudAlert>
-            }
-            else
-            {
-                @if (session.PanelDateTimeNow is DateTime panelTime)
+            <MudPaper Elevation="2" Class="pa-4 mb-4" Outlined="@(!isConnected)">
+                @* ── Connection header ── *@
+                <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
+                    <MudIcon Icon="@(isConnected ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.LinkOff)"
+                             Color="@(isConnected ? Color.Success : Color.Default)"
+                             Size="Size.Small" />
+                    <MudText Typo="Typo.h6">@sessionId</MudText>
+                    @if (isConnected && session?.PanelDateTimeNow is DateTime panelTime)
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                            <MudIcon Icon="@Icons.Material.Filled.Schedule" Size="Size.Small" Class="mr-1" Style="vertical-align: middle;" />
+                            @panelTime.ToString("F")
+                        </MudText>
+                    }
+                </MudStack>
+
+                @if (!isConnected)
                 {
-                    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-3">
-                        <MudIcon Icon="@Icons.Material.Filled.Schedule" Size="Size.Small" Class="mr-1" Style="vertical-align: middle;" />
-                        Panel Time: @panelTime.ToString("F")
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">
+                        Panel is not connected.
+                        <MudLink Href="/connections">Manage connection →</MudLink>
                     </MudText>
                 }
-                <MudText Typo="Typo.h5" Class="mb-3">Partitions</MudText>
-                @if (!session.Partitions.Any())
+                else if (session == null)
                 {
-                    <MudAlert Severity="Severity.Info" Class="mb-6">
-                        <MudText>Waiting for partition data from panel...</MudText>
+                    <MudAlert Severity="Severity.Info" Dense="true">
+                        Waiting for session data...
+                    </MudAlert>
+                }
+                else if (!session.Partitions.Any())
+                {
+                    <MudAlert Severity="Severity.Info" Dense="true">
+                        Waiting for partition data from panel...
                     </MudAlert>
                 }
                 else
                 {
-                <MudGrid Class="mb-6">
-                    @foreach (var (partitionNumber, partition) in session.Partitions.OrderBy(p => p.Key))
+                    var partitions = session.Partitions.OrderBy(p => p.Key).ToList();
+                    var singlePartition = partitions.Count == 1;
+
+                    @if (!singlePartition)
                     {
-                        <MudItem xs="12" lg="6">
-                            <MudCard Elevation="4" Class="mb-4">
-                                <MudCardHeader>
-                                    <CardHeaderContent>
-                                        <MudText Typo="Typo.h5">@partition.DisplayName</MudText>
-                                    </CardHeaderContent>
-                                    <CardHeaderActions>
-                                        <MudChip T="string" 
-                                                 Color="@GetPartitionChipColor(partition)" 
-                                                 Size="Size.Small"
-                                                 Style="@(partition.EffectiveStatus == PartitionStatus.Arming ? "animation: pulse 1s infinite;" : "")">
-                                            @GetPartitionDisplayText(partition)
-                                        </MudChip>
-                                    </CardHeaderActions>
-                                </MudCardHeader>
-                                <MudCardContent>
-                                    <MudText Typo="Typo.caption" Color="Color.Secondary">
-                                        Zones: @session.Zones.Values.Count(z => z.Partitions.Contains(partitionNumber))
-                                    </MudText>
-                                </MudCardContent>
-                                <MudCardActions>
+                        <MudText Typo="Typo.subtitle1" Class="mb-2">Partitions</MudText>
+                    }
+
+                    @foreach (var (partitionNumber, partition) in partitions)
+                    {
+                        var zonesForPartition = session.Zones.Values
+                            .Where(z => z.Partitions.Contains(partitionNumber))
+                            .OrderBy(z => z.ZoneNumber)
+                            .ToList();
+
+                        <MudCard Elevation="1" Class="mb-3">
+                            <MudCardHeader>
+                                <CardHeaderContent>
+                                    <MudText Typo="Typo.h6">@partition.DisplayName</MudText>
+                                </CardHeaderContent>
+                                <CardHeaderActions>
+                                    <MudChip T="string"
+                                             Color="@GetPartitionChipColor(partition)"
+                                             Size="Size.Small"
+                                             Style="@(partition.EffectiveStatus == PartitionStatus.Arming ? "animation: pulse 1s infinite;" : "")">
+                                        @GetPartitionDisplayText(partition)
+                                    </MudChip>
+                                </CardHeaderActions>
+                            </MudCardHeader>
+                            <MudCardContent>
+                                @* ── Arm / Disarm controls ── *@
+                                <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Class="mb-3">
                                     @if (partition.IsArmed)
                                     {
                                         <MudButton Variant="Variant.Filled"
                                                    Color="Color.Success"
                                                    Size="Size.Small"
                                                    StartIcon="@Icons.Material.Filled.LockOpen"
-                                                   OnClick="@(() => ShowDisarmDialog(partitionNumber))"
+                                                   OnClick="@(() => ShowDisarmDialog(sessionId, partitionNumber))"
                                                    Disabled="@commandInProgress">
                                             Disarm
                                         </MudButton>
@@ -104,7 +120,7 @@
                                                    Color="Color.Error"
                                                    Size="Size.Small"
                                                    StartIcon="@Icons.Material.Filled.Lock"
-                                                   OnClick="@(() => ArmPartitionAsync(partitionNumber, ArmingMode.AwayArm))"
+                                                   OnClick="@(() => ArmPartitionAsync(sessionId, partitionNumber, ArmingMode.AwayArm))"
                                                    Disabled="@(!partition.IsReady || commandInProgress)">
                                             Away
                                         </MudButton>
@@ -112,7 +128,7 @@
                                                    Color="Color.Warning"
                                                    Size="Size.Small"
                                                    StartIcon="@Icons.Material.Filled.Home"
-                                                   OnClick="@(() => ArmPartitionAsync(partitionNumber, ArmingMode.StayArm))"
+                                                   OnClick="@(() => ArmPartitionAsync(sessionId, partitionNumber, ArmingMode.StayArm))"
                                                    Disabled="@(!partition.IsReady || commandInProgress)">
                                             Stay
                                         </MudButton>
@@ -120,51 +136,49 @@
                                                    Color="Color.Dark"
                                                    Size="Size.Small"
                                                    StartIcon="@Icons.Material.Filled.NightsStay"
-                                                   OnClick="@(() => ArmPartitionAsync(partitionNumber, ArmingMode.NightArm))"
+                                                   OnClick="@(() => ArmPartitionAsync(sessionId, partitionNumber, ArmingMode.NightArm))"
                                                    Disabled="@(!partition.IsReady || commandInProgress)">
                                             Night
                                         </MudButton>
                                     }
                                     <MudSpacer />
-                                    <MudButton Variant="Variant.Text" 
-                                               Color="Color.Primary" 
-                                               OnClick="@(() => ShowZoneDetails(partitionNumber))">
-                                        View Zones
-                                    </MudButton>
-                                </MudCardActions>
-                            </MudCard>
-                        </MudItem>
-                    }
-                </MudGrid>
-                }
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                        @zonesForPartition.Count zones
+                                    </MudText>
+                                </MudStack>
 
-                <MudText Typo="Typo.h5" Class="mb-3">All Zones (@session.Zones.Count)</MudText>
-                <MudPaper Class="pa-4">
-                    <MudGrid Spacing="1">
-                        @foreach (var (zoneNumber, zone) in session.Zones.OrderBy(z => z.Key))
-                        {
-                            <MudItem xs="6" sm="4" md="3" lg="2">
-                                <MudTooltip Text="@GetZoneTooltip(zone)">
-                                    <MudChip T="string" 
-                                             Size="Size.Small" 
-                                             Color="@GetZoneColor(zone)"
-                                             Variant="@(zone.IsOpen || zone.IsFaulted || zone.IsTampered ? Variant.Filled : Variant.Outlined)"
-                                             Style="@(string.IsNullOrEmpty(zone.DisplayNameLine2) ? "" : "height: auto;")">
-                                        <MudIcon Icon="@GetZoneIcon(zone)" Size="Size.Small" Class="mr-1" />
-                                        <span>
-                                            @zone.DisplayNameLine1
-                                            @if (!string.IsNullOrEmpty(zone.DisplayNameLine2))
-                                            {
-                                                <br />@zone.DisplayNameLine2
-                                            }
-                                        </span>
-                                    </MudChip>
-                                </MudTooltip>
-                            </MudItem>
-                        }
-                    </MudGrid>
-                </MudPaper>
-            }
+                                @* ── Inline zone chips ── *@
+                                @if (zonesForPartition.Any())
+                                {
+                                    <MudGrid Spacing="1">
+                                        @foreach (var zone in zonesForPartition)
+                                        {
+                                            <MudItem xs="6" sm="4" md="3" lg="2">
+                                                <MudTooltip Text="@GetZoneTooltip(zone)">
+                                                    <MudChip T="string"
+                                                             Size="Size.Small"
+                                                             Color="@GetZoneColor(zone)"
+                                                             Variant="@(zone.IsOpen || zone.IsFaulted || zone.IsTampered ? Variant.Filled : Variant.Outlined)"
+                                                             Style="@(string.IsNullOrEmpty(zone.DisplayNameLine2) ? "" : "height: auto;")">
+                                                        <MudIcon Icon="@GetZoneIcon(zone)" Size="Size.Small" Class="mr-1" />
+                                                        <span>
+                                                            @zone.DisplayNameLine1
+                                                            @if (!string.IsNullOrEmpty(zone.DisplayNameLine2))
+                                                            {
+                                                                <br />@zone.DisplayNameLine2
+                                                            }
+                                                        </span>
+                                                    </MudChip>
+                                                </MudTooltip>
+                                            </MudItem>
+                                        }
+                                    </MudGrid>
+                                }
+                            </MudCardContent>
+                        </MudCard>
+                    }
+                }
+            </MudPaper>
         }
     }
 </MudContainer>
@@ -244,48 +258,55 @@
 </MudDialog>
 
 @code {
-    private string selectedSessionId = "";
-    private List<string> activeSessions = new();
-    private bool commandInProgress;
-    private string disarmCode = "";
-    private byte? disarmPartition;
-    private bool showDisarmDialog;
-    private Timer? _clockTimer;
+	private List<string> configuredConnections = new();
+	private HashSet<string> activeSessions = new();
+	private List<string> allSessionIds = new();
+	private bool commandInProgress;
+	private string disarmCode = "";
+	private string? disarmSessionId;
+	private byte? disarmPartition;
+	private bool showDisarmDialog;
+	private Timer? _clockTimer;
 
-    protected override void OnInitialized()
-    {
-        RefreshSessions();
-        SessionMonitor.SessionsChanged += OnSessionsChanged;
-        PanelState.SessionStateChanged += OnStateChanged;
-        PanelState.PartitionStateChanged += OnStateChanged;
-        PanelState.ZoneStateChanged += OnStateChanged;
+	protected override void OnInitialized()
+	{
+		RefreshSessions();
+		SessionMonitor.SessionsChanged += OnSessionsChanged;
+		PanelState.SessionStateChanged += OnStateChanged;
+		PanelState.PartitionStateChanged += OnStateChanged;
+		PanelState.ZoneStateChanged += OnStateChanged;
 
-        _clockTimer = new Timer(_ => InvokeAsync(StateHasChanged), null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
-    }
+		_clockTimer = new Timer(_ => InvokeAsync(StateHasChanged), null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
+	}
 
-    private void OnSessionsChanged()
-    {
-        InvokeAsync(() =>
-        {
-            RefreshSessions();
-            StateHasChanged();
-        });
-    }
+	private void OnSessionsChanged()
+	{
+		InvokeAsync(() =>
+		{
+			RefreshSessions();
+			StateHasChanged();
+		});
+	}
 
-    private void OnStateChanged(object? sender, EventArgs e)
-    {
-        InvokeAsync(StateHasChanged);
-    }
+	private void OnStateChanged(object? sender, EventArgs e)
+	{
+		InvokeAsync(StateHasChanged);
+	}
 
-    private void RefreshSessions()
-    {
-        activeSessions = SessionManager.GetActiveSessions().ToList();
-        
-        if (string.IsNullOrEmpty(selectedSessionId) || !activeSessions.Contains(selectedSessionId))
-            selectedSessionId = activeSessions.FirstOrDefault() ?? "";
-    }
+	private void RefreshSessions()
+	{
+		activeSessions = SessionManager.GetActiveSessions().ToHashSet();
+		configuredConnections = ConnectionSettings.CurrentValue.Connections
+			.Select(c => c.SessionId)
+			.ToList();
 
-    private Color GetZoneColor(ZoneState zone) => zone switch
+		// Merge: configured connections first (preserving order), then any active sessions not in config
+		allSessionIds = configuredConnections
+			.Union(activeSessions, StringComparer.OrdinalIgnoreCase)
+			.ToList();
+	}
+
+	private Color GetZoneColor(ZoneState zone) => zone switch
 	{
 		{ IsTampered: true } => Color.Error,
 		{ IsFaulted: true } => Color.Error,
@@ -294,146 +315,140 @@
 		_ => Color.Success
 	};
 
-    private string GetZoneIcon(ZoneState zone) => zone switch
-    {
-        { IsTampered: true } => Icons.Material.Filled.Error,
-        { IsFaulted: true } => Icons.Material.Filled.Warning,
-        { IsOpen: true } => Icons.Material.Filled.LockOpen,
-        { IsBypassed: true } => Icons.Material.Filled.Block,
-        _ => Icons.Material.Filled.Lock
-    };
+	private string GetZoneIcon(ZoneState zone) => zone switch
+	{
+		{ IsTampered: true } => Icons.Material.Filled.Error,
+		{ IsFaulted: true } => Icons.Material.Filled.Warning,
+		{ IsOpen: true } => Icons.Material.Filled.LockOpen,
+		{ IsBypassed: true } => Icons.Material.Filled.Block,
+		_ => Icons.Material.Filled.Lock
+	};
 
-    private string GetZoneTooltip(ZoneState zone)
-    {
-        var status = new List<string> { zone.DisplayNameLine1 ?? $"Zone {zone.ZoneNumber}" };
+	private string GetZoneTooltip(ZoneState zone)
+	{
+		var status = new List<string> { zone.DisplayNameLine1 ?? $"Zone {zone.ZoneNumber}" };
 
-        if (!string.IsNullOrEmpty(zone.DisplayNameLine2))
-            status.Add(zone.DisplayNameLine2);
+		if (!string.IsNullOrEmpty(zone.DisplayNameLine2))
+			status.Add(zone.DisplayNameLine2);
 
-        status.Add(zone.IsOpen ? "OPEN" : "CLOSED");
+		status.Add(zone.IsOpen ? "OPEN" : "CLOSED");
 
-        if (zone.IsTampered) status.Add("TAMPERED");
-        if (zone.IsFaulted) status.Add("FAULTED");
-        if (zone.IsBypassed) status.Add("BYPASSED");
+		if (zone.IsTampered) status.Add("TAMPERED");
+		if (zone.IsFaulted) status.Add("FAULTED");
+		if (zone.IsBypassed) status.Add("BYPASSED");
 
-        if (zone.Partitions.Any())
-            status.Add($"Partitions: {string.Join(",", zone.Partitions)}");
+		if (zone.Partitions.Any())
+			status.Add($"Partitions: {string.Join(",", zone.Partitions)}");
 
-        status.Add($"Updated: {zone.LastUpdated.ToLocalTime():HH:mm:ss}");
+		status.Add($"Updated: {zone.LastUpdated.ToLocalTime():HH:mm:ss}");
 
-        return string.Join(" | ", status);
-    }
+		return string.Join(" | ", status);
+	}
 
-    private void ShowZoneDetails(byte partitionNumber)
-    {
-        Navigation.NavigateTo($"/zones/{selectedSessionId}/{partitionNumber}");
-    }
+	private string GetPartitionDisplayText(PartitionState partition)
+	{
+		return partition.EffectiveStatus switch
+		{
+			PartitionStatus.Disarmed => "Disarmed",
+			PartitionStatus.ArmedAway => "Armed Away",
+			PartitionStatus.ArmedHome => "Armed Home",
+			PartitionStatus.ArmedNight => "Armed Night",
+			PartitionStatus.Arming => partition.Status switch
+			{
+				PartitionStatus.ArmedAway => "Arming Away",
+				PartitionStatus.ArmedHome => "Arming Home",
+				PartitionStatus.ArmedNight => "Arming Night",
+				_ => "Arming"
+			},
+			PartitionStatus.Pending => "Entry Delay",
+			PartitionStatus.Triggered => "ALARM",
+			_ => partition.IsReady ? "Ready" : "Not Ready"
+		};
+	}
 
-    private string GetPartitionDisplayText(PartitionState partition)
-    {
-        return partition.EffectiveStatus switch
-        {
-            PartitionStatus.Disarmed => "Disarmed",
-            PartitionStatus.ArmedAway => "Armed Away",
-            PartitionStatus.ArmedHome => "Armed Home",
-            PartitionStatus.ArmedNight => "Armed Night",
-            PartitionStatus.Arming => partition.Status switch
-            {
-                PartitionStatus.ArmedAway => "Arming Away",
-                PartitionStatus.ArmedHome => "Arming Home",
-                PartitionStatus.ArmedNight => "Arming Night",
-                _ => "Arming"
-            },
-            PartitionStatus.Pending => "Entry Delay",
-            PartitionStatus.Triggered => "ALARM",
-            _ => partition.IsReady ? "Ready" : "Not Ready"
-        };
-    }
-
-    private Color GetPartitionChipColor(PartitionState partition) => partition.EffectiveStatus switch
-    {
-        PartitionStatus.Arming => Color.Warning,
-        PartitionStatus.Pending => Color.Warning,
+	private Color GetPartitionChipColor(PartitionState partition) => partition.EffectiveStatus switch
+	{
+		PartitionStatus.Arming => Color.Warning,
+		PartitionStatus.Pending => Color.Warning,
 		PartitionStatus.Triggered => Color.Error,
 		_ when partition.IsArmed => Color.Error,
 		_ when partition.IsReady => Color.Success,
 		_ => Color.Warning
 	};
 
-    private async Task ArmPartitionAsync(byte partition, ArmingMode mode)
-    {
-        if (string.IsNullOrEmpty(selectedSessionId)) return;
+	private async Task ArmPartitionAsync(string sessionId, byte partition, ArmingMode mode)
+	{
+		commandInProgress = true;
+		StateHasChanged();
 
-        commandInProgress = true;
-        StateHasChanged();
+		try
+		{
+			var result = await CommandService.ArmAsync(sessionId, partition, mode);
+			if (!result.Success)
+				Snackbar.Add($"Arm failed: {result.ErrorMessage}", Severity.Error);
+		}
+		finally
+		{
+			commandInProgress = false;
+			StateHasChanged();
+		}
+	}
 
-        try
-        {
-            var result = await CommandService.ArmAsync(selectedSessionId, partition, mode);
-            if (!result.Success)
-                Snackbar.Add($"Arm failed: {result.ErrorMessage}", Severity.Error);
-        }
-        finally
-        {
-            commandInProgress = false;
-            StateHasChanged();
-        }
-    }
+	private void ShowDisarmDialog(string sessionId, byte partition)
+	{
+		disarmSessionId = sessionId;
+		disarmPartition = partition;
+		disarmCode = "";
+		showDisarmDialog = true;
+	}
 
-    private void ShowDisarmDialog(byte partition)
-    {
-        disarmPartition = partition;
-        disarmCode = "";
-        showDisarmDialog = true;
-    }
+	private void AddDigit(string digit)
+	{
+		disarmCode += digit;
+	}
 
-    private void AddDigit(string digit)
-    {
-        disarmCode += digit;
-    }
+	private void Backspace()
+	{
+		if (!string.IsNullOrEmpty(disarmCode))
+			disarmCode = disarmCode[..^1];
+	}
 
-    private void Backspace()
-    {
-        if (!string.IsNullOrEmpty(disarmCode))
-            disarmCode = disarmCode[..^1];
-    }
+	private void ClearCode()
+	{
+		disarmCode = "";
+	}
 
-    private void ClearCode()
-    {
-        disarmCode = "";
-    }
+	private async Task DisarmPartitionAsync()
+	{
+		if (string.IsNullOrEmpty(disarmSessionId) || !disarmPartition.HasValue) return;
 
-    private async Task DisarmPartitionAsync()
-    {
-        if (string.IsNullOrEmpty(selectedSessionId) || !disarmPartition.HasValue) return;
+		showDisarmDialog = false;
+		commandInProgress = true;
+		StateHasChanged();
 
-        showDisarmDialog = false;
-        commandInProgress = true;
-        StateHasChanged();
+		try
+		{
+			var code = string.IsNullOrEmpty(disarmCode) ? null : disarmCode;
+			var result = await CommandService.DisarmAsync(disarmSessionId, disarmPartition.Value, code);
+			if (!result.Success)
+				Snackbar.Add($"Disarm failed: {result.ErrorMessage}", Severity.Error);
+		}
+		finally
+		{
+			commandInProgress = false;
+			disarmCode = "";
+			disarmSessionId = null;
+			disarmPartition = null;
+			StateHasChanged();
+		}
+	}
 
-        try
-        {
-            // Pass null if code is empty to use default from settings
-            var code = string.IsNullOrEmpty(disarmCode) ? null : disarmCode;
-            var result = await CommandService.DisarmAsync(selectedSessionId, disarmPartition.Value, code);
-            if (!result.Success)
-                Snackbar.Add($"Disarm failed: {result.ErrorMessage}", Severity.Error);
-        }
-        finally
-        {
-            commandInProgress = false;
-            disarmCode = "";
-            disarmPartition = null;
-            StateHasChanged();
-        }
-    }
-
-    public void Dispose()
-    {
-        _clockTimer?.Dispose();
-        SessionMonitor.SessionsChanged -= OnSessionsChanged;
-        PanelState.SessionStateChanged -= OnStateChanged;
-        PanelState.PartitionStateChanged -= OnStateChanged;
-        PanelState.ZoneStateChanged -= OnStateChanged;
-    }
+	public void Dispose()
+	{
+		_clockTimer?.Dispose();
+		SessionMonitor.SessionsChanged -= OnSessionsChanged;
+		PanelState.SessionStateChanged -= OnStateChanged;
+		PanelState.PartitionStateChanged -= OnStateChanged;
+		PanelState.ZoneStateChanged -= OnStateChanged;
+	}
 }

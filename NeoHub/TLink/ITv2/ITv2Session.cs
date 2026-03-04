@@ -41,7 +41,7 @@ namespace DSC.TLink.ITv2;
 internal sealed class ITv2Session : IITv2Session
 {
     private readonly ITLinkTransport _transport;
-    private readonly ITv2Settings _settings;
+    private readonly IConnectionSettingsProvider _settingsProvider;
     private readonly ILogger<ITv2Session> _logger;
     private readonly Channel<IMessageData> _notificationChannel;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
@@ -57,18 +57,23 @@ internal sealed class ITv2Session : IITv2Session
 
     // Encryption state
     private EncryptionHandler? _encryption;
+    private ConnectionSettings? _connectionSettings;
 
-    // Reconnection queue flush
-    private readonly TaskCompletionSource _queueFlushed = new();
-    private Timer? _flushTimer;
+    // Logging scope — set once SessionId is known, covers the rest of the session lifetime
+    private IDisposable? _sessionScope;
+
+    // Session readiness — panels blast buffered messages on connect;
+    // we ack them but discard notifications until the burst subsides.
+    private readonly TaskCompletionSource _sessionReady = new();
+    private Timer? _readyTimer;
 
     private ITv2Session(
         ITLinkTransport transport,
-        ITv2Settings settings,
+        IConnectionSettingsProvider settingsProvider,
         ILogger<ITv2Session> logger)
     {
         _transport = transport ?? throw new ArgumentNullException(nameof(transport));
-        _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+        _settingsProvider = settingsProvider ?? throw new ArgumentNullException(nameof(settingsProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         _notificationChannel = Channel.CreateUnbounded<IMessageData>(new UnboundedChannelOptions
@@ -77,12 +82,12 @@ internal sealed class ITv2Session : IITv2Session
             SingleWriter = true
         });
 
-        _flushTimer = new Timer(_ =>
+        _readyTimer = new Timer(_ =>
         {
-            _logger.LogInformation("Receive queue flushed, ready to send");
-            _queueFlushed.TrySetResult();
-            _flushTimer?.Dispose();
-            _flushTimer = null;
+            _logger.LogInformation("Session ready — initial message burst complete");
+            _sessionReady.TrySetResult();
+            _readyTimer?.Dispose();
+            _readyTimer = null;
         });
     }
 
@@ -96,18 +101,18 @@ internal sealed class ITv2Session : IITv2Session
     /// </summary>
     public static async Task<Result<ITv2Session>> CreateAsync(
         IDuplexPipe pipe,
-        ITv2Settings settings,
+        IConnectionSettingsProvider settingsProvider,
         ILoggerFactory loggerFactory,
         CancellationToken ct = default)
     {
         var transport = new TLinkTransport(pipe, loggerFactory.CreateLogger<TLinkTransport>());
-        var session = new ITv2Session(transport, settings, loggerFactory.CreateLogger<ITv2Session>());
+        var session = new ITv2Session(transport, settingsProvider, loggerFactory.CreateLogger<ITv2Session>());
 
         var handshakeResult = await session.PerformHandshakeAsync(ct);
         if (handshakeResult.IsFailure)
             return Result<ITv2Session>.Fail(handshakeResult.Error!.Value);
 
-        session._logger.LogInformation("Session {SessionId} connected successfully", session.SessionId);
+        session._logger.LogInformation("Session connected successfully");
 
         _ = session.ReceivePumpAsync();
         _ = session.HeartbeatLoopAsync();
@@ -157,8 +162,20 @@ internal sealed class ITv2Session : IITv2Session
         var initialPacket = await ReceivePacketAsync(ct);
 
         SessionId = System.Text.Encoding.UTF8.GetString(_transport.DefaultHeader.Span);
-        _logger.LogInformation("Connection from Integration Identification Number [851][422]: {SessionId}", SessionId);
+        _sessionScope = _logger.BeginScope(ITv2ConnectionHandler.CreateLogScope(SessionId));
+        _logger.LogInformation("Connection from Integration Identification Number [851][422]");
         OpenSession openSession = initialPacket.Message.As<OpenSession>();
+
+        // Resolve per-connection settings now that we know the session ID and encryption type
+        _connectionSettings = _settingsProvider.ResolveConnection(SessionId, openSession.EncryptionType);
+        if (_connectionSettings == null)
+            return Result.Fail(TLinkErrorCode.ConfigurationError,
+                $"No valid connection settings for session {SessionId}");
+
+        if (!_connectionSettings.HasEncryptionKey(openSession.EncryptionType))
+            return Result.Fail(TLinkErrorCode.ConfigurationError,
+                $"Session {SessionId} requires {openSession.EncryptionType} encryption but the access code is not configured");
+
         _commandSequence = openSession.CommandSequence;
 
         _logger.LogInformation("Handshake: OpenSession with encryption type {Type}", openSession.EncryptionType);
@@ -203,7 +220,7 @@ internal sealed class ITv2Session : IITv2Session
     public async Task<Result<IMessageData>> SendAsync(IMessageData message, CancellationToken ct = default)
     {
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, _shutdownCts.Token);
-        await _queueFlushed.Task.WaitAsync(linkedCts.Token);
+        await _sessionReady.Task.WaitAsync(linkedCts.Token);
         return await SendMessageAsync(message, linkedCts.Token);
     }
 
@@ -226,11 +243,11 @@ internal sealed class ITv2Session : IITv2Session
         var ct = _shutdownCts.Token;
         try
         {
-            _flushTimer!.Change(TimeSpan.FromSeconds(2), Timeout.InfiniteTimeSpan);
+            _readyTimer!.Change(TimeSpan.FromSeconds(2), Timeout.InfiniteTimeSpan);
 
             await foreach (var tlinkResult in _transport.ReadAllAsync(ct))
             {
-                _flushTimer?.Change(TimeSpan.FromSeconds(2), Timeout.InfiniteTimeSpan);
+                _readyTimer?.Change(TimeSpan.FromSeconds(2), Timeout.InfiniteTimeSpan);
 
                 if (tlinkResult.IsFailure)
                 {
@@ -261,7 +278,15 @@ internal sealed class ITv2Session : IITv2Session
                     continue;
                 }
 
-                // Not matched — publish as notification(s)
+                // Discard unsolicited notifications during the initial message burst
+                if (!_sessionReady.Task.IsCompleted)
+                {
+                    if (packet.Message is not SimpleAck)
+                        _logger.LogDebug("Discarding pre-ready notification: {MessageType}", packet.Message.GetType().Name);
+                    continue;
+                }
+
+                // Session is ready — publish as notification(s)
                 await PublishNotificationsAsync(packet, ct);
             }
 
@@ -478,8 +503,8 @@ internal sealed class ITv2Session : IITv2Session
 
         _encryption = type switch
         {
-            EncryptionType.Type1 => new Type1EncryptionHandler(_settings),
-            EncryptionType.Type2 => new Type2EncryptionHandler(_settings),
+            EncryptionType.Type1 => new Type1EncryptionHandler(_connectionSettings!),
+            EncryptionType.Type2 => new Type2EncryptionHandler(_connectionSettings!),
             _ => throw new NotSupportedException($"Unsupported encryption type: {type}")
         };
 
@@ -495,7 +520,7 @@ internal sealed class ITv2Session : IITv2Session
         var ct = _shutdownCts.Token;
         try
         {
-            await _queueFlushed.Task.WaitAsync(ct);
+            await _sessionReady.Task.WaitAsync(ct);
 
             while (!ct.IsCancellationRequested)
             {
@@ -521,7 +546,7 @@ internal sealed class ITv2Session : IITv2Session
     {
         _shutdownCts.Cancel();
 
-        _flushTimer?.Dispose();
+        _readyTimer?.Dispose();
         _notificationChannel.Writer.Complete();
 
         foreach (var receiver in _pendingReceivers)
@@ -531,6 +556,7 @@ internal sealed class ITv2Session : IITv2Session
         _sendLock.Dispose();
         _shutdownCts.Dispose();
         _encryption?.Dispose();
+        _sessionScope?.Dispose();
 
         await _transport.DisposeAsync();
     }

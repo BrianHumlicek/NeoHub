@@ -24,14 +24,14 @@ namespace DSC.TLink.ITv2.Encryption
 		private readonly byte[] _integrationIdentificationNumber;
 
 		/// <summary>
-		/// Create Type1 encryption handler from configuration
+		/// Create Type1 encryption handler from per-connection settings
 		/// </summary>
-		public Type1EncryptionHandler(ITv2Settings settings)
+		public Type1EncryptionHandler(ConnectionSettings connection)
 			: this(
-				settings.IntegrationAccessCodeType1 
+				connection.IntegrationAccessCodeType1 
 					?? throw new InvalidOperationException("IntegrationAccessCodeType1 is not configured"),
-				settings.IntegrationIdentificationNumber 
-					?? throw new InvalidOperationException("IntegrationIdentificationNumber is not configured"))
+				connection.SessionId 
+					?? throw new InvalidOperationException("SessionId is not configured"))
 		{
 		}
 

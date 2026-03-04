@@ -23,10 +23,10 @@ namespace DSC.TLink.ITv2.Encryption
         private readonly byte[] _integrationAccessCode;
 
         /// <summary>
-        /// Create Type2 encryption handler from configuration
+        /// Create Type2 encryption handler from per-connection settings
         /// </summary>
-        public Type2EncryptionHandler(ITv2Settings settings)
-            : this(settings.IntegrationAccessCodeType2 
+        public Type2EncryptionHandler(ConnectionSettings connection)
+            : this(connection.IntegrationAccessCodeType2 
                 ?? throw new InvalidOperationException("IntegrationAccessCodeType2 is not configured"))
         {
         }

@@ -34,7 +34,7 @@ namespace DSC.TLink.ITv2.MediatR
             var session = _sessionManager.GetSession(request.SessionID);
             if (session == null)
             {
-                _logger.LogWarning("Command failed - session {SessionId} not found", request.SessionID);
+                _logger.LogWarning("Command failed - session not found");
                 return new SessionResponse
                 {
                     Success = false,
@@ -65,7 +65,7 @@ namespace DSC.TLink.ITv2.MediatR
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error handling command for session {SessionId}", request.SessionID);
+                _logger.LogError(ex, "Error handling command");
                 return new SessionResponse
                 {
                     Success = false,
@@ -101,12 +101,12 @@ namespace DSC.TLink.ITv2.MediatR
 
                 await _mediator.Publish(notification);
 
-                _logger.LogTrace("Published SessionNotification<{MessageType}> for session {SessionId}",
-                    messageType.Name, sessionId);
+                _logger.LogTrace("Published SessionNotification<{MessageType}>",
+                    messageType.Name);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error publishing notification for session {SessionId}", sessionId);
+                _logger.LogError(ex, "Error publishing notification");
             }
         }
 
