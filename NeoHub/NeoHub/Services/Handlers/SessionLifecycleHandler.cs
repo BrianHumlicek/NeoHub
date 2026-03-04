@@ -11,11 +11,13 @@ namespace NeoHub.Services.Handlers
         INotificationHandler<SessionDisconnectedNotification>
     {
         private readonly ISessionMonitor _monitor;
+        private readonly IPanelStateService _panelState;
         private readonly ILogger<SessionLifecycleHandler> _logger;
 
-        public SessionLifecycleHandler(ISessionMonitor monitor, ILogger<SessionLifecycleHandler> logger)
+        public SessionLifecycleHandler(ISessionMonitor monitor, IPanelStateService panelState, ILogger<SessionLifecycleHandler> logger)
         {
             _monitor = monitor;
+            _panelState = panelState;
             _logger = logger;
         }
 
@@ -29,6 +31,7 @@ namespace NeoHub.Services.Handlers
         public Task Handle(SessionDisconnectedNotification notification, CancellationToken cancellationToken)
         {
             _logger.LogInformation("Session disconnected");
+            _panelState.RemoveSession(notification.SessionId);
             _monitor.NotifyChanged();
             return Task.CompletedTask;
         }

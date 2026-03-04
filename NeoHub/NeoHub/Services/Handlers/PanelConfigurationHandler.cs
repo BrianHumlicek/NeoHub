@@ -248,6 +248,11 @@ namespace NeoHub.Services.Handlers
                 zone.IsBypassed = status.HasFlag(ModuleZoneStatus.ZoneStatusEnum.Bypass);
                 zone.LastUpdated = DateTime.UtcNow;
 
+                // TODO: No protocol-level way to get zone-partition mapping yet.
+                // For now, assign all zones to partition 1.
+                if (!zone.Partitions.Any())
+                    zone.Partitions.Add(1);
+
                 _panelState.UpdateZone(sessionId, zone);
             }
 

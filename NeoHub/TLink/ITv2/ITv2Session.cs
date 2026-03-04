@@ -62,9 +62,10 @@ internal sealed class ITv2Session : IITv2Session
     // Logging scope — set once SessionId is known, covers the rest of the session lifetime
     private IDisposable? _sessionScope;
 
-    // Reconnection queue flush
-    private readonly TaskCompletionSource _queueFlushed = new();
-    private Timer? _flushTimer;
+    // Session readiness — panels blast buffered messages on connect;
+    // we ack them but discard notifications until the burst subsides.
+    private readonly TaskCompletionSource _sessionReady = new();
+    private Timer? _readyTimer;
 
     private ITv2Session(
         ITLinkTransport transport,
@@ -81,12 +82,12 @@ internal sealed class ITv2Session : IITv2Session
             SingleWriter = true
         });
 
-        _flushTimer = new Timer(_ =>
+        _readyTimer = new Timer(_ =>
         {
-            _logger.LogInformation("Receive queue flushed, ready to send");
-            _queueFlushed.TrySetResult();
-            _flushTimer?.Dispose();
-            _flushTimer = null;
+            _logger.LogInformation("Session ready — initial message burst complete");
+            _sessionReady.TrySetResult();
+            _readyTimer?.Dispose();
+            _readyTimer = null;
         });
     }
 
@@ -219,7 +220,7 @@ internal sealed class ITv2Session : IITv2Session
     public async Task<Result<IMessageData>> SendAsync(IMessageData message, CancellationToken ct = default)
     {
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, _shutdownCts.Token);
-        await _queueFlushed.Task.WaitAsync(linkedCts.Token);
+        await _sessionReady.Task.WaitAsync(linkedCts.Token);
         return await SendMessageAsync(message, linkedCts.Token);
     }
 
@@ -242,11 +243,11 @@ internal sealed class ITv2Session : IITv2Session
         var ct = _shutdownCts.Token;
         try
         {
-            _flushTimer!.Change(TimeSpan.FromSeconds(2), Timeout.InfiniteTimeSpan);
+            _readyTimer!.Change(TimeSpan.FromSeconds(2), Timeout.InfiniteTimeSpan);
 
             await foreach (var tlinkResult in _transport.ReadAllAsync(ct))
             {
-                _flushTimer?.Change(TimeSpan.FromSeconds(2), Timeout.InfiniteTimeSpan);
+                _readyTimer?.Change(TimeSpan.FromSeconds(2), Timeout.InfiniteTimeSpan);
 
                 if (tlinkResult.IsFailure)
                 {
@@ -277,7 +278,15 @@ internal sealed class ITv2Session : IITv2Session
                     continue;
                 }
 
-                // Not matched — publish as notification(s)
+                // Discard unsolicited notifications during the initial message burst
+                if (!_sessionReady.Task.IsCompleted)
+                {
+                    if (packet.Message is not SimpleAck)
+                        _logger.LogDebug("Discarding pre-ready notification: {MessageType}", packet.Message.GetType().Name);
+                    continue;
+                }
+
+                // Session is ready — publish as notification(s)
                 await PublishNotificationsAsync(packet, ct);
             }
 
@@ -511,7 +520,7 @@ internal sealed class ITv2Session : IITv2Session
         var ct = _shutdownCts.Token;
         try
         {
-            await _queueFlushed.Task.WaitAsync(ct);
+            await _sessionReady.Task.WaitAsync(ct);
 
             while (!ct.IsCancellationRequested)
             {
@@ -537,7 +546,7 @@ internal sealed class ITv2Session : IITv2Session
     {
         _shutdownCts.Cancel();
 
-        _flushTimer?.Dispose();
+        _readyTimer?.Dispose();
         _notificationChannel.Writer.Complete();
 
         foreach (var receiver in _pendingReceivers)

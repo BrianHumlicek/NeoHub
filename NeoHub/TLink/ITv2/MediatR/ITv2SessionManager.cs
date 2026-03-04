@@ -13,6 +13,7 @@ namespace DSC.TLink.ITv2.MediatR
         internal void UnregisterSession(string sessionId);
         internal IITv2Session? GetSession(string sessionId);
         IEnumerable<string> GetActiveSessions();
+        Task DisconnectSessionAsync(string sessionId);
     }
 
     internal class ITv2SessionManager : IITv2SessionManager
@@ -54,6 +55,16 @@ namespace DSC.TLink.ITv2.MediatR
         public IITv2Session? GetSession(string sessionId)
         {
             return _sessions.TryGetValue(sessionId, out var session) ? session : null;
+        }
+
+        public async Task DisconnectSessionAsync(string sessionId)
+        {
+            if (_sessions.TryRemove(sessionId, out var session))
+            {
+                _logger.LogInformation("Disconnecting session {SessionId}", sessionId);
+                await session.DisposeAsync();
+                PublishLifecycleNotification(new SessionDisconnectedNotification(sessionId));
+            }
         }
 
         public IEnumerable<string> GetActiveSessions()

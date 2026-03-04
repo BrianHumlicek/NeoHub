@@ -40,12 +40,12 @@ public class ConnectionSettingsProvider : IConnectionSettingsProvider
             return null;
         }
 
-        // Update encryption type if the panel reports it and we had Unknown
-        if (existing.EncryptionType == EncryptionType.Unknown && encryptionType != EncryptionType.Unknown)
+        // Always update encryption type to match what the panel actually uses
+        if (encryptionType != EncryptionType.Unknown && existing.EncryptionType != encryptionType)
         {
             _logger.LogInformation(
-                "Updating encryption type for {SessionId} from Unknown to {EncryptionType}",
-                sessionId, encryptionType);
+                "Updating encryption type for {SessionId} from {Old} to {New}",
+                sessionId, existing.EncryptionType, encryptionType);
             existing.EncryptionType = encryptionType;
             PersistSettingsAsync();
         }

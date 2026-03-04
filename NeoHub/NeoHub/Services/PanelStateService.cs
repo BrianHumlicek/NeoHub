@@ -40,6 +40,7 @@ namespace NeoHub.Services
             var session = GetOrCreateSession(sessionId);
             update(session);
             session.LastUpdated = DateTime.UtcNow;
+            session.LastMessageAt = DateTime.UtcNow;
 
             _logger.LogDebug("Updated session {Session}", sessionId);
 
@@ -48,6 +49,12 @@ namespace NeoHub.Services
                 SessionId = sessionId,
                 Session = session
             });
+        }
+
+        public void RemoveSession(string sessionId)
+        {
+            if (_sessions.TryRemove(sessionId, out _))
+                _logger.LogInformation("Removed session state for {Session}", sessionId);
         }
 
         #endregion
@@ -71,6 +78,7 @@ namespace NeoHub.Services
             var session = GetOrCreateSession(sessionId);
             session.Partitions[partition.PartitionNumber] = partition;
             session.LastUpdated = DateTime.UtcNow;
+            session.LastMessageAt = DateTime.UtcNow;
 
             _logger.LogDebug("Updated partition {Partition} for session {Session}",
                 partition.PartitionNumber, sessionId);
@@ -103,6 +111,7 @@ namespace NeoHub.Services
             var session = GetOrCreateSession(sessionId);
             session.Zones[zone.ZoneNumber] = zone;
             session.LastUpdated = DateTime.UtcNow;
+            session.LastMessageAt = DateTime.UtcNow;
 
             _logger.LogDebug("Updated zone {Zone} for session {Session}",
                 zone.ZoneNumber, sessionId);
