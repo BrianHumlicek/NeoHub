@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using DSC.TLink.ITv2;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
 
@@ -10,7 +11,7 @@ namespace NeoHub.Services.Diagnostics
     /// clamped to the floor defined in appsettings.json Logging:LogLevel so
     /// verbose levels (Trace/Debug) only apply to solution code.
     /// </summary>
-    public class DiagnosticsLoggerProvider : ILoggerProvider
+    public class DiagnosticsLoggerProvider : ILoggerProvider, ISupportExternalScope
     {
         private static readonly string[] SolutionPrefixes = ["NeoHub", "DSC.TLink"];
 
@@ -19,6 +20,7 @@ namespace NeoHub.Services.Diagnostics
         private readonly IConfiguration _configuration;
         private readonly ConcurrentDictionary<string, LogLevel> _configLevelCache = new();
         private readonly IDisposable? _configChangeRegistration;
+        private IExternalScopeProvider? _scopeProvider;
 
         public DiagnosticsLoggerProvider(
             IDiagnosticsLogService diagnosticsService,
@@ -34,9 +36,14 @@ namespace NeoHub.Services.Diagnostics
                 () => _configLevelCache.Clear());
         }
 
+        public void SetScopeProvider(IExternalScopeProvider scopeProvider)
+        {
+            _scopeProvider = scopeProvider;
+        }
+
         public ILogger CreateLogger(string categoryName)
         {
-            return new DiagnosticsLogger(categoryName, _diagnosticsService, _settings, _configuration, _configLevelCache);
+            return new DiagnosticsLogger(categoryName, _diagnosticsService, _settings, _configuration, _configLevelCache, this);
         }
 
         public void Dispose()
@@ -52,13 +59,15 @@ namespace NeoHub.Services.Diagnostics
             private readonly IOptionsMonitor<DiagnosticsSettings> _settings;
             private readonly IConfiguration _configuration;
             private readonly ConcurrentDictionary<string, LogLevel> _configLevelCache;
+            private readonly DiagnosticsLoggerProvider _provider;
 
             public DiagnosticsLogger(
                 string category,
                 IDiagnosticsLogService diagnosticsService,
                 IOptionsMonitor<DiagnosticsSettings> settings,
                 IConfiguration configuration,
-                ConcurrentDictionary<string, LogLevel> configLevelCache)
+                ConcurrentDictionary<string, LogLevel> configLevelCache,
+                DiagnosticsLoggerProvider provider)
             {
                 _category = category;
                 _isSolutionCategory = IsSolutionCategory(category);
@@ -66,9 +75,11 @@ namespace NeoHub.Services.Diagnostics
                 _settings = settings;
                 _configuration = configuration;
                 _configLevelCache = configLevelCache;
+                _provider = provider;
             }
 
-            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull
+                => _provider._scopeProvider?.Push(state);
 
             public bool IsEnabled(LogLevel logLevel)
             {
@@ -106,8 +117,26 @@ namespace NeoHub.Services.Diagnostics
                     LogLevel = logLevel,
                     Category = _category,
                     Message = formatter(state, exception),
-                    Exception = exception
+                    Exception = exception,
+                    SessionId = ExtractSessionId()
                 });
+            }
+
+            private string? ExtractSessionId()
+            {
+                string? sessionId = null;
+                _provider._scopeProvider?.ForEachScope((scope, _) =>
+                {
+                    if (scope is IEnumerable<KeyValuePair<string, object>> kvps)
+                    {
+                        foreach (var kvp in kvps)
+                        {
+                            if (kvp.Key == ConnectionSettings.LogScopeKey)
+                                sessionId = kvp.Value?.ToString();
+                        }
+                    }
+                }, 0);
+                return sessionId;
             }
 
             /// <summary>

@@ -27,6 +27,9 @@ namespace DSC.TLink
         private readonly IServiceProvider _serviceProvider;
         private readonly ILogger<ITv2ConnectionHandler> _log;
 
+        internal static Dictionary<string, object> CreateLogScope(string sessionId) =>
+            new() { [ConnectionSettings.LogScopeKey] = sessionId };
+
         public ITv2ConnectionHandler(
             IServiceProvider serviceProvider,
             ILogger<ITv2ConnectionHandler> log)
@@ -56,6 +59,9 @@ namespace DSC.TLink
                 }
 
                 await using var session = result.Value;
+
+                using var sessionScope = _log.BeginScope(
+                    CreateLogScope(session.SessionId));
 
                 sessionManager.RegisterSession(session.SessionId, session);
                 try

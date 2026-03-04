@@ -7,5 +7,6 @@ namespace NeoHub.Services.Diagnostics
         public required string Category { get; init; }
         public required string Message { get; init; }
         public Exception? Exception { get; init; }
+        public string? SessionId { get; init; }
     }
 }

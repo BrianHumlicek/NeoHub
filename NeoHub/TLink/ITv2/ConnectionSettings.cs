@@ -32,6 +32,11 @@ public class ConnectionSettings
     public const int DefaultListenPort = 3072;
 
     /// <summary>
+    /// Logging scope key used to tag log entries with a session identifier.
+    /// </summary>
+    public const string LogScopeKey = nameof(SessionId);
+
+    /// <summary>
     /// The panel's Integration Identification Number [851][422].
     /// Sent by the panel during the handshake — acts as the unique key for this connection.
     /// </summary>

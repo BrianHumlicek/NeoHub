@@ -235,6 +235,7 @@ internal sealed class ITv2Session : IITv2Session
 
     private async Task ReceivePumpAsync()
     {
+        using var scope = _logger.BeginScope(ITv2ConnectionHandler.CreateLogScope(SessionId));
         var ct = _shutdownCts.Token;
         try
         {
@@ -504,6 +505,7 @@ internal sealed class ITv2Session : IITv2Session
 
     private async Task HeartbeatLoopAsync()
     {
+        using var scope = _logger.BeginScope(ITv2ConnectionHandler.CreateLogScope(SessionId));
         var ct = _shutdownCts.Token;
         try
         {
