@@ -19,19 +19,10 @@
 <PageTitle>Connections</PageTitle>
 
 <MudContainer MaxWidth="MaxWidth.Large" Class="mt-4">
-    <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
-        <MudText Typo="Typo.h4">
-            <MudIcon Icon="@Icons.Material.Filled.Cable" Class="mr-2" Style="vertical-align: middle;" />
-            Connections
-        </MudText>
-        <MudSpacer />
-        <MudButton Variant="Variant.Filled"
-                   Color="Color.Primary"
-                   StartIcon="@Icons.Material.Filled.Add"
-                   OnClick="AddConnection">
-            Add Connection
-        </MudButton>
-    </MudStack>
+    <MudText Typo="Typo.h4" GutterBottom="true">
+        <MudIcon Icon="@Icons.Material.Filled.Cable" Class="mr-2" Style="vertical-align: middle;" />
+        Connections
+    </MudText>
 
     @if (!connections.Any())
     {
@@ -87,30 +78,22 @@
                             <MudText Typo="Typo.subtitle2" Class="mb-2">Connection Settings</MudText>
                             <MudGrid Spacing="2">
                                 <MudItem xs="12" sm="6">
-                                    @{ var isNewConnection = string.IsNullOrEmpty(conn.SessionId); }
                                     <MudTextField T="string"
                                                   Label="Session ID"
                                                   Value="@conn.SessionId"
-                                                  ValueChanged="@(v => conn.SessionId = v ?? "")"
-                                                  ReadOnly="@(!isNewConnection)"
+                                                  ReadOnly="true"
                                                   HelperText="Integration Identification Number [851][422]"
                                                   Variant="Variant.Outlined"
                                                   Margin="Margin.Dense" />
                                 </MudItem>
                                 <MudItem xs="12" sm="6">
-                                    <MudSelect T="DSC.TLink.ITv2.Enumerations.EncryptionType"
-                                               Label="Encryption Type"
-                                               @bind-Value="conn.EncryptionType"
-                                               HelperText="Encryption type negotiated by the panel during handshake"
-                                               Variant="Variant.Outlined"
-                                               Margin="Margin.Dense">
-                                        <MudSelectItem T="DSC.TLink.ITv2.Enumerations.EncryptionType"
-                                                       Value="DSC.TLink.ITv2.Enumerations.EncryptionType.Unknown">Unknown</MudSelectItem>
-                                        <MudSelectItem T="DSC.TLink.ITv2.Enumerations.EncryptionType"
-                                                       Value="DSC.TLink.ITv2.Enumerations.EncryptionType.Type1">Type 1</MudSelectItem>
-                                        <MudSelectItem T="DSC.TLink.ITv2.Enumerations.EncryptionType"
-                                                       Value="DSC.TLink.ITv2.Enumerations.EncryptionType.Type2">Type 2</MudSelectItem>
-                                    </MudSelect>
+                                    <MudTextField T="string"
+                                                  Label="Encryption Type"
+                                                  Value="@conn.EncryptionType.ToString()"
+                                                  ReadOnly="true"
+                                                  HelperText="Encryption type negotiated by the panel during handshake"
+                                                  Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense" />
                                 </MudItem>
                                 <MudItem xs="12" sm="6">
                                     @{ var showType1 = visibleFields.Contains($"{conn.SessionId}:Type1"); }
@@ -281,15 +264,6 @@
     {
         if (!visibleFields.Remove(fieldKey))
             visibleFields.Add(fieldKey);
-    }
-
-    private void AddConnection()
-    {
-        var conn = new ConnectionSettings();
-        ConnectionSettings.CurrentValue.Connections.Add(conn);
-        RefreshData();
-        expandedSettings = conn.SessionId;
-        expandedLogs = null;
     }
 
     private async Task DeleteConnection(ConnectionSettings conn)
