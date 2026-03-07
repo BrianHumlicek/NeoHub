@@ -1,14 +1,11 @@
-name: Build and Publish Docker Image
+name: Build and Publish Release
 
 on:
-  push:
-    branches: [ master, main ]
-  workflow_dispatch:
+  release:
+    types: [published]
 
 env:
   REGISTRY_GHCR: ghcr.io
-  # Replace 'your-dockerhub-username' with your actual Docker Hub ID
-  DOCKERHUB_REPO: brianhumlicek/${{ github.event.repository.name }}
 
 jobs:
   build-and-push:
@@ -27,7 +24,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 1. Login to GitHub Container Registry
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -35,27 +31,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 2. Login to Docker Hub (Add your secrets first!)
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      # 3. Extract metadata for BOTH registries
       - name: Extract metadata (tags, labels)
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: |
             ${{ env.REGISTRY_GHCR }}/${{ github.repository }}
-            ${{ env.DOCKERHUB_REPO }}
           tags: |
-            type=ref,event=branch
-            type=sha
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest
 
-      # 4. Build once and push to both
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
@@ -64,6 +51,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           build-args: |
             GITHUB_SHA=${{ github.sha }}
             GITHUB_RUN_NUMBER=${{ github.run_number }}

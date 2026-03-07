@@ -1,6 +1,8 @@
 services:
   NeoHub:
-    image: "ghcr.io/brianhumlicek/neohub:latest"
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: NeoHub
     ports:
       - "5181:8080"     # HTTP Web UI
