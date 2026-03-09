@@ -34,12 +34,12 @@ namespace NeoHub.Services.Handlers
             var zone = _service.GetZone(sessionId, msg.ZoneNumber)
                 ?? new ZoneState { ZoneNumber = msg.ZoneNumber };
 
-            zone.IsBypassed = msg.BypassState != 0;
+            zone.IsBypassed = msg.BypassStatus == SingleZoneBypassStatus.BypassStatusEnum.Bypassed;
             zone.LastUpdated = notification.ReceivedAt;
 
             _logger.LogDebug(
                 "Zone {Zone} bypass status: {Status}",
-                msg.ZoneNumber, zone.IsBypassed ? "BYPASSED" : "NOT BYPASSED");
+                msg.ZoneNumber, msg.BypassStatus);
 
             _service.UpdateZone(sessionId, zone);
 
