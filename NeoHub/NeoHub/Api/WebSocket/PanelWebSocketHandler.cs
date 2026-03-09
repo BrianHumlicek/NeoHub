@@ -196,6 +196,7 @@ namespace NeoHub.Api.WebSocket
                                 Name = kvp.Value.DisplayName,
                                 DeviceClass = DetermineDeviceClass(kvp.Value),
                                 Open = kvp.Value.IsOpen,
+                                Bypassed = kvp.Value.IsBypassed,
                                 Partitions = kvp.Value.Partitions
                             })
                             .ToList()
@@ -330,14 +331,15 @@ namespace NeoHub.Api.WebSocket
                 return;
             }
 
-            _logger.LogDebug("Broadcasting zone_update: Session={SessionId}, Zone={Zone}, Open={Open}",
-                e.SessionId, e.Zone.ZoneNumber, e.Zone.IsOpen);
+            _logger.LogDebug("Broadcasting zone_update: Session={SessionId}, Zone={Zone}, Open={Open}, Bypassed={Bypassed}",
+                e.SessionId, e.Zone.ZoneNumber, e.Zone.IsOpen, e.Zone.IsBypassed);
 
             var message = new ZoneUpdateMessage
             {
                 SessionId = e.SessionId,
                 ZoneNumber = e.Zone.ZoneNumber,
-                Open = e.Zone.IsOpen
+                Open = e.Zone.IsOpen,
+                Bypassed = e.Zone.IsBypassed
             };
 
             _ = BroadcastMessageAsync(message);

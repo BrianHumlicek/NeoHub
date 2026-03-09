@@ -53,6 +53,7 @@ namespace NeoHub.Api.WebSocket.Models
         public required string SessionId { get; init; }
         public required byte ZoneNumber { get; init; }
         public required bool Open { get; init; }
+        public required bool Bypassed { get; init; }
     }
 
     public record ErrorMessage : WebSocketMessage
@@ -85,6 +86,7 @@ namespace NeoHub.Api.WebSocket.Models
         public required string Name { get; init; }
         public required string DeviceClass { get; init; }
         public required bool Open { get; init; }
+        public required bool Bypassed { get; init; }
         public required List<byte> Partitions { get; init; }
     }
 
