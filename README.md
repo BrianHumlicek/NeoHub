@@ -17,36 +17,13 @@ A real-time web portal for monitoring and controlling DSC PowerSeries NEO alarm 
 
 ### Docker Compose (Recommended)
 
-1. Create a `docker-compose.yml` file:
-
-````````
-version: '3.4'
-
-services:
-  NeoHub:
-    image: ghcr.io/brianhumlicek/NeoHub:latest
-    container_name: NeoHub
-    ports:
-      - "5181:8080"     # HTTP Web UI
-      - "7013:8443"     # HTTPS Web UI
-      - "3072:3072"     # Panel ITv2 connection
-    volumes:
-      - NeoHub:/app/persist
-    restart: unless-stopped
-
-volumes:
-  NeoHub_persist:
-````````
-
-2. Create a `userSettings.json` file (see [Configuration](#-configuration) below)
-
-3. Start the container:
+1. Start the container using the included `docker-compose.yml`:
 
 ````````
 docker-compose up -d
 ````````
 
-4. Access the UI at `http://localhost:5181` or `https://localhost:7013`
+2. Access the UI at `http://localhost:5181` or `https://localhost:7013`
 
 ### Docker Run
 
@@ -283,7 +260,11 @@ Program the following tags in section **[851]** for your chosen integration slot
 
 ### Local Development
 
-````````
+The repository includes `docker-compose.local.yml` for building and running the image from source instead of pulling from GHCR.
+
+```
+docker-compose -f docker-compose.local.yml up -d --build
+```
 
 ---
 
