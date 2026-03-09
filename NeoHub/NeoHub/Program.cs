@@ -18,10 +18,10 @@ namespace NeoHub
             // Migrate legacy settings format if needed (safe to remove once all deployments are migrated)
             SettingsMigration.MigrateIfNeeded(builder.Environment.ContentRootPath);
 
-            // Load user settings from persist folder (overrides appsettings.json)
-            // AddJsonFile resolves relative paths from ContentRootPath
+            // Load user settings from persist folder (overrides appsettings.json).
+            // Path respects NEOHUB_PERSIST_PATH env var (used by HA addon to point to addon_config).
             builder.Configuration.AddJsonFile(
-                SettingsPersistenceService.SettingsFileRelativePath,
+                SettingsPersistenceService.GetSettingsFilePath(builder.Environment.ContentRootPath),
                 optional: true, 
                 reloadOnChange: true);
 
@@ -51,6 +51,9 @@ namespace NeoHub
             // Without this, the framework's default "Information" floor discards Trace/Debug
             // before they ever reach the provider.
             builder.Logging.AddFilter<DiagnosticsLoggerProvider>(null, LogLevel.Trace);
+
+            // HttpContextAccessor for Home Assistant ingress path base
+            builder.Services.AddHttpContextAccessor();
 
             // Add Blazor services
             builder.Services.AddRazorComponents()
@@ -102,6 +105,17 @@ namespace NeoHub
             app.Services.GetRequiredService<ISettingsDiscoveryService>();
 
             app.UseWebSockets();
+
+            // HA ingress support: set PathBase from X-Ingress-Path header
+            app.Use(async (context, next) =>
+            {
+                var ingressPath = context.Request.Headers["X-Ingress-Path"].FirstOrDefault();
+                if (!string.IsNullOrEmpty(ingressPath))
+                {
+                    context.Request.PathBase = ingressPath;
+                }
+                await next();
+            });
 
             if (!app.Environment.IsDevelopment())
             {

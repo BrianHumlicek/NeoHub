@@ -23,10 +23,21 @@ namespace NeoHub.Services.Settings
         private readonly SemaphoreSlim _fileLock = new(1, 1);
 
         /// <summary>
-        /// Returns the relative path to userSettings.json (relative to ContentRootPath).
-        /// Used by both Program.cs (AddJsonFile) and this service (read/write).
+        /// Returns the persist folder path. Checks NEOHUB_PERSIST_PATH env var first,
+        /// falls back to {contentRootPath}/persist.
         /// </summary>
-        public static string SettingsFileRelativePath => Path.Combine(PersistFolder, SettingsFileName);
+        public static string GetPersistPath(string contentRootPath)
+        {
+            var envPath = Environment.GetEnvironmentVariable("NEOHUB_PERSIST_PATH");
+            return !string.IsNullOrEmpty(envPath) ? envPath : Path.Combine(contentRootPath, PersistFolder);
+        }
+
+        /// <summary>
+        /// Returns the absolute path to userSettings.json.
+        /// Used by Program.cs (AddJsonFile), SettingsMigration, and this service.
+        /// </summary>
+        public static string GetSettingsFilePath(string contentRootPath)
+            => Path.Combine(GetPersistPath(contentRootPath), SettingsFileName);
 
         public string PersistPath { get; }
         private string SettingsFilePath { get; }
@@ -38,8 +49,8 @@ namespace NeoHub.Services.Settings
         {
             _serviceProvider = serviceProvider;
             _log = log;
-            PersistPath = Path.Combine(env.ContentRootPath, PersistFolder);
-            SettingsFilePath = Path.Combine(env.ContentRootPath, SettingsFileRelativePath);
+            PersistPath = GetPersistPath(env.ContentRootPath);
+            SettingsFilePath = Path.Combine(PersistPath, SettingsFileName);
 
             // Ensure persist directory exists
             Directory.CreateDirectory(PersistPath);

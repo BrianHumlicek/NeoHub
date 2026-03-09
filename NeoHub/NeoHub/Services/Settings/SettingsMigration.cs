@@ -37,7 +37,7 @@ public static class SettingsMigration
     /// </summary>
     public static void MigrateIfNeeded(string contentRootPath)
     {
-        var filePath = Path.Combine(contentRootPath, SettingsPersistenceService.SettingsFileRelativePath);
+        var filePath = SettingsPersistenceService.GetSettingsFilePath(contentRootPath);
 
         if (!File.Exists(filePath))
             return;
