@@ -1,4 +1,5 @@
-﻿using DSC.TLink.ITv2.Messages;
+using DSC.TLink.ITv2.Enumerations;
+using DSC.TLink.ITv2.Messages;
 using MediatR;
 using Microsoft.Extensions.Logging;
 
@@ -54,6 +55,18 @@ namespace DSC.TLink.ITv2.MediatR
                         Success = false,
                         ErrorCode = result.Error!.Value.Code,
                         ErrorMessage = result.Error.Value.Message
+                    };
+                }
+
+                if (result.Value is CommandResponse { ResponseCode: not CommandResponseCode.Success } errorResponse)
+                {
+                    _logger.LogWarning("Panel rejected command: [{Code}] {Description}",
+                        errorResponse.ResponseCode, errorResponse.ResponseCode.Description());
+
+                    return new SessionResponse
+                    {
+                        Success = false,
+                        ErrorMessage = errorResponse.ResponseCode.Description(),
                     };
                 }
 

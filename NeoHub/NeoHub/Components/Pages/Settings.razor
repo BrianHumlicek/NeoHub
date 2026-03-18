@@ -1,5 +1,6 @@
 @page "/settings"
 @using NeoHub.Services.Settings
+@using System.ComponentModel.DataAnnotations
 @using System.Reflection
 @using MudBlazor
 @inject ISettingsDiscoveryService DiscoveryService
@@ -35,46 +36,45 @@
                 <MudAlert Severity="Severity.Info" Class="mb-4">@_section.Description</MudAlert>
             }
 
-            <EditForm Model="@GetSectionSettings(_section)" OnValidSubmit="@(() => SaveSection(_section))">
-                <DataAnnotationsValidator />
+            @{
+                var groupedProperties = _section.Properties.GroupBy(p => p.GroupName ?? "General").ToList();
+                var hasMultipleGroups = _section.Properties.Select(p => p.GroupName).Distinct().Count() > 1;
+            }
 
-                @{
-                    var groupedProperties = _section.Properties.GroupBy(p => p.GroupName ?? "General").ToList();
-                    var hasMultipleGroups = _section.Properties.Select(p => p.GroupName).Distinct().Count() > 1;
-                }
-
-                @foreach (var propGroup in groupedProperties)
+            @foreach (var propGroup in groupedProperties)
+            {
+                @if (hasMultipleGroups)
                 {
-                    @if (hasMultipleGroups)
-                    {
-                        <MudText Typo="Typo.h6" Class="mt-3 mb-2">@propGroup.Key</MudText>
-                        <MudDivider Class="mb-3" />
-                    }
-
-                    @foreach (var property in propGroup)
-                    {
-                        <div class="mt-3">
-                            @RenderProperty(_section, property)
-                        </div>
-                    }
+                    <MudText Typo="Typo.h6" Class="mt-3 mb-2">@propGroup.Key</MudText>
+                    <MudDivider Class="mb-3" />
                 }
 
-                <MudButton ButtonType="ButtonType.Submit"
-                           Variant="Variant.Filled"
-                           Color="Color.Primary"
-                           Class="mt-4"
-                           Disabled="@_saving">
-                    @if (_saving)
-                    {
-                        <MudProgressCircular Class="mr-2" Size="Size.Small" Indeterminate="true" />
-                        <MudText>Saving...</MudText>
-                    }
-                    else
-                    {
-                        <MudText>Save @_section.DisplayName</MudText>
-                    }
-                </MudButton>
-            </EditForm>
+                @foreach (var property in propGroup)
+                {
+                    <div class="mt-3">
+                        @RenderProperty(_section, property)
+                    </div>
+                }
+            }
+
+            @{
+                var sectionCopy = _section;
+            }
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       Class="mt-4"
+                       Disabled="@_saving"
+                       OnClick="@(() => SaveSection(sectionCopy))">
+                @if (_saving)
+                {
+                    <MudProgressCircular Class="mr-2" Size="Size.Small" Indeterminate="true" />
+                    <MudText>Saving...</MudText>
+                }
+                else
+                {
+                    <MudText>Save @_section.DisplayName</MudText>
+                }
+            </MudButton>
         </MudPaper>
     }
 </MudContainer>
@@ -106,6 +106,8 @@
 
             if (property.PropertyType == typeof(string))
             {
+                var sectionRef = section;
+                var propertyRef = property;
                 <MudTextField T="string"
                               Label="@property.DisplayName"
                               Value="@((string?)currentValue)"
@@ -114,7 +116,9 @@
                               Variant="Variant.Outlined"
                               Required="@property.IsRequired"
                               InputType="@(property.IsSensitive ? InputType.Password : InputType.Text)"
-                              Margin="Margin.Dense" />
+                              Margin="Margin.Dense"
+                              Immediate="true"
+                              Validation="@(new Func<string?, string?>(v => ValidateProperty(sectionRef, propertyRef, v)))" />
             }
             else if (property.PropertyType == typeof(int))
             {
@@ -159,12 +163,29 @@
         };
     }
 
+    private string? ValidateProperty(SettingsSectionMetadata section, SettingsPropertyMetadata property, object? value)
+    {
+        var propInfo = section.SettingsType.GetProperty(property.PropertyName)!;
+        var context = new ValidationContext(GetSectionSettings(section)) { MemberName = property.PropertyName };
+        var results = new List<ValidationResult>();
+        Validator.TryValidateProperty(value, context, results);
+        return results.FirstOrDefault()?.ErrorMessage;
+    }
+
     private async Task SaveSection(SettingsSectionMetadata section)
     {
+        var settings = GetSectionSettings(section);
+        var results = new List<ValidationResult>();
+        if (!Validator.TryValidateObject(settings, new ValidationContext(settings), results, validateAllProperties: true))
+        {
+            foreach (var r in results)
+                Snackbar.Add(r.ErrorMessage ?? "Validation error", Severity.Error);
+            return;
+        }
+
         _saving = true;
         try
         {
-            var settings = GetSectionSettings(section);
             await PersistenceService.SaveSettingsAsync(section.SettingsType, settings);
             Snackbar.Add($"{section.DisplayName} saved successfully!", Severity.Success);
         }

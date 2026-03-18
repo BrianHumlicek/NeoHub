@@ -21,6 +21,7 @@ namespace DSC.TLink.Serialization
         LeadingLengthBCDString,
         ByteArrayFixed,
         ByteArrayLeadingLength,
+        ByteArrayCompactIntegerLength,
         ByteArrayUnbounded,
         ObjectArrayLeadingLength,
         UnicodeStringArrayUnbounded,
