@@ -30,7 +30,7 @@ namespace DSC.TLink.ITv2.Messages
     ///   "1234" → [0x01, 0x02, 0x03, 0x04]  (NOT BCD, NOT ASCII)
     /// Panel returns InvalidUserCredentials if BCD or ASCII encoding is used.
     ///
-    /// For zone bypass: ProgrammingType = 0x03 (UserBypassProgramming), ReadWriteMode = 0x01.
+    /// For zone bypass: ProgrammingMode = UserBypassProgramming, AccessMode = UserCode.
     /// </summary>
     [ITv2Command(ITv2Command.Configuration_Enter)]
     public record ConfigurationEnter : CommandMessageBase
@@ -38,8 +38,7 @@ namespace DSC.TLink.ITv2.Messages
         [CompactInteger]
         public int Partition { get; init; }
 
-        /// <summary>Programming type. 0x03 = UserBypassProgramming.</summary>
-        public byte ProgrammingType { get; init; } = 0x03;
+        public ProgrammingMode ProgrammingMode { get; init; } = ProgrammingMode.UserBypassProgramming;
 
         /// <summary>
         /// Access code as raw digit bytes (one byte per digit, value 0–9).
@@ -48,7 +47,6 @@ namespace DSC.TLink.ITv2.Messages
         [CompactIntegerArray]
         public byte[] AccessCode { get; init; } = Array.Empty<byte>();
 
-        /// <summary>Access mode. 0x01 = user code.</summary>
-        public byte ReadWriteMode { get; init; } = 0x01;
+        public ProgrammingAccessMode AccessMode { get; init; } = ProgrammingAccessMode.UserCode;
     }
 }

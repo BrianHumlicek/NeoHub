@@ -79,9 +79,9 @@ namespace NeoHub.Services
             var enterResult = await SendCommandAsync(sessionId, new ConfigurationEnter
             {
                 Partition = partition,
-                ProgrammingType = 0x03,
+                ProgrammingMode = ProgrammingMode.UserBypassProgramming,
                 AccessCode = ToRawDigitBytes(code),
-                ReadWriteMode = 0x01,
+                AccessMode = ProgrammingAccessMode.UserCode,
             });
 
             if (!enterResult.Success)
