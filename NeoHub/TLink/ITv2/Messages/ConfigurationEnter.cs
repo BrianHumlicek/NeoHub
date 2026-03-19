@@ -24,7 +24,7 @@ namespace DSC.TLink.ITv2.Messages
     /// Must be sent before <see cref="SingleZoneBypassWrite"/> (0x074A).
     ///
     /// Wire format (verified from dsc-itv2-client Node.js implementation):
-    ///   [CompactInt: Partition][byte: ProgrammingType][CompactIntArray: AccessCode][byte: ReadWriteMode]
+    ///   [CompactInt: Partition][byte: ProgrammingType][1B-length: AccessCode][byte: ReadWriteMode]
     ///
     /// AccessCode encoding: raw digit values, one byte per digit.
     ///   "1234" → [0x01, 0x02, 0x03, 0x04]  (NOT BCD, NOT ASCII)
@@ -42,9 +42,9 @@ namespace DSC.TLink.ITv2.Messages
 
         /// <summary>
         /// Access code as raw digit bytes (one byte per digit, value 0–9).
-        /// Serialized with a CompactInteger length prefix.
+        /// Serialized with a single leading length byte: [len][digits...].
         /// </summary>
-        [CompactIntegerArray]
+        [LeadingLengthArray(lengthBytes: 1)]
         public byte[] AccessCode { get; init; } = Array.Empty<byte>();
 
         public ProgrammingAccessMode AccessMode { get; init; } = ProgrammingAccessMode.UserCode;

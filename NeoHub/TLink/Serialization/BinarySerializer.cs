@@ -123,14 +123,6 @@ namespace DSC.TLink.Serialization
                         ByteArraySerializer.WriteLeadingLengthArray(bytes, pp.Property.Name, (byte[]?)pp.Property.GetValue(instance), pp.LengthPrefixBytes);
                         break;
 
-                    case SerializerKind.ByteArrayCompactIntegerLength:
-                    {
-                        var arr = (byte[]?)pp.Property.GetValue(instance) ?? Array.Empty<byte>();
-                        CompactIntegerSerializer.Write(bytes, typeof(int), arr.Length);
-                        bytes.AddRange(arr);
-                        break;
-                    }
-
                     case SerializerKind.ByteArrayUnbounded:
                         bytes.AddRange((byte[]?)pp.Property.GetValue(instance) ?? Array.Empty<byte>());
                         break;
@@ -235,18 +227,6 @@ namespace DSC.TLink.Serialization
                     case SerializerKind.ByteArrayLeadingLength:
                         pp.Property.SetValue(instance, ByteArraySerializer.ReadLeadingLengthArray(bytes, ref offset, pp.Property.Name, pp.LengthPrefixBytes));
                         break;
-
-                    case SerializerKind.ByteArrayCompactIntegerLength:
-                    {
-                        int length = (int)CompactIntegerSerializer.Read(bytes, ref offset, typeof(int));
-                        if (offset + length > bytes.Length)
-                            throw new InvalidOperationException(
-                                $"Not enough bytes to read CompactIntegerArray '{pp.Property.Name}': need {length}, have {bytes.Length - offset}");
-                        var arr = bytes.Slice(offset, length).ToArray();
-                        offset += length;
-                        pp.Property.SetValue(instance, arr);
-                        break;
-                    }
 
                     case SerializerKind.ByteArrayUnbounded:
                     {
@@ -483,15 +463,6 @@ namespace DSC.TLink.Serialization
                             Property = property,
                             Kind = SerializerKind.ByteArrayLeadingLength,
                             LengthPrefixBytes = lengthAttr.LengthBytes,
-                        };
-                    }
-
-                    if (property.IsDefined(typeof(CompactIntegerArrayAttribute), false))
-                    {
-                        return new PropertyPlan
-                        {
-                            Property = property,
-                            Kind = SerializerKind.ByteArrayCompactIntegerLength,
                         };
                     }
 
