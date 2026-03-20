@@ -2,6 +2,8 @@
 @using NeoHub.Services
 @using NeoHub.Services.Models
 @inject IPanelStateService PanelState
+@inject IPanelCommandService PanelCommand
+@inject ISnackbar Snackbar
 @inject NavigationManager Navigation
 @implements IDisposable
 
@@ -28,17 +30,38 @@
             <MudStack Row="true" AlignItems="AlignItems.Center">
                 <MudText Typo="Typo.h4">@partitionDisplayName</MudText>
                 <MudSpacer />
-                <MudChip T="string" 
-                         Color="@(partition.IsReady ? Color.Success : Color.Warning)" 
+                <MudChip T="string"
+                         Color="@(partition.IsReady ? Color.Success : Color.Warning)"
                          Size="Size.Medium">
                     @partition.EffectiveStatus
                 </MudChip>
             </MudStack>
         </MudPaper>
 
-        <MudText Typo="Typo.h5" Class="mb-3">
-            Zones (@zonesForPartition.Count)
-        </MudText>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
+            <MudText Typo="Typo.h5">
+                Zones (@zonesForPartition.Count)
+            </MudText>
+            <MudSpacer />
+            @{
+                var openUnbypassed = zonesForPartition.Where(z => z.IsOpen && !z.IsBypassed).ToList();
+            }
+            <MudButton Variant="Variant.Outlined"
+                       Color="Color.Warning"
+                       StartIcon="@Icons.Material.Filled.Block"
+                       Disabled="@(!openUnbypassed.Any() || _bypassingAll)"
+                       OnClick="BypassAllOpenZonesAsync">
+                @if (_bypassingAll)
+                {
+                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                    <span>Bypassing...</span>
+                }
+                else
+                {
+                    <span>Bypass Open Zones (@openUnbypassed.Count)</span>
+                }
+            </MudButton>
+        </MudStack>
 
         @if (!zonesForPartition.Any())
         {
@@ -56,6 +79,7 @@
                     <MudTh>State Flags</MudTh>
                     <MudTh>Other Partitions</MudTh>
                     <MudTh>Last Updated</MudTh>
+                    <MudTh>Bypass</MudTh>
                 </HeaderContent>
                 <RowTemplate>
                     <MudTd DataLabel="Zone">
@@ -71,8 +95,8 @@
                         </MudStack>
                     </MudTd>
                     <MudTd DataLabel="Status">
-                        <MudChip T="string" 
-                                 Size="Size.Small" 
+                        <MudChip T="string"
+                                 Size="Size.Small"
                                  Color="@GetZoneColor(context)"
                                  Icon="@GetZoneIcon(context)">
                             @(context.IsOpen ? "OPEN" : "CLOSED")
@@ -110,6 +134,25 @@
                     <MudTd DataLabel="Last Updated">
                         <MudText Typo="Typo.caption">@context.LastUpdated.ToLocalTime().ToString("HH:mm:ss")</MudText>
                     </MudTd>
+                    <MudTd DataLabel="Bypass">
+                        @{
+                            var zone = context;
+                            var isBusy = _busyZones.Contains(zone.ZoneNumber);
+                        }
+                        @if (isBusy)
+                        {
+                            <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+                        }
+                        else
+                        {
+                            <MudTooltip Text="@(zone.IsBypassed ? "Unbypass zone" : "Bypass zone")">
+                                <MudIconButton Icon="@(zone.IsBypassed ? Icons.Material.Filled.Block : Icons.Material.Outlined.Block)"
+                                               Color="@(zone.IsBypassed ? Color.Info : Color.Default)"
+                                               Size="Size.Small"
+                                               OnClick="@(() => ToggleBypassAsync(zone))" />
+                            </MudTooltip>
+                        }
+                    </MudTd>
                 </RowTemplate>
             </MudTable>
         }
@@ -128,6 +171,9 @@
     private List<ZoneState> zonesForPartition = new();
     private List<BreadcrumbItem> breadcrumbs = new();
     private string partitionDisplayName = "";
+
+    private readonly HashSet<byte> _busyZones = new();
+    private bool _bypassingAll;
 
     private CancellationTokenSource _cts = new();
 
@@ -153,7 +199,6 @@
 
         if (session != null)
         {
-            // Get all zones that belong to this partition
             zonesForPartition = session.Zones.Values
                 .Where(z => z.Partitions.Contains((byte)PartitionNumber))
                 .OrderBy(z => z.ZoneNumber)
@@ -169,6 +214,88 @@
             LoadData();
             StateHasChanged();
         });
+    }
+
+    private async Task ToggleBypassAsync(ZoneState zone)
+    {
+        if (_busyZones.Contains(zone.ZoneNumber)) return;
+
+        _busyZones.Add(zone.ZoneNumber);
+        StateHasChanged();
+
+        var bypassing = !zone.IsBypassed;
+        try
+        {
+            var result = await PanelCommand.BypassZoneAsync(
+                SessionId, (byte)PartitionNumber, zone.ZoneNumber, bypassing);
+
+            if (result.Success)
+            {
+                Snackbar.Add(
+                    $"Zone {zone.ZoneNumber} {(bypassing ? "bypassed" : "unbypassed")}",
+                    Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add($"Bypass failed: {result.ErrorMessage}", Severity.Error);
+            }
+        }
+        finally
+        {
+            _busyZones.Remove(zone.ZoneNumber);
+            StateHasChanged();
+        }
+    }
+
+    private async Task BypassAllOpenZonesAsync()
+    {
+        var openUnbypassed = zonesForPartition.Where(z => z.IsOpen && !z.IsBypassed).ToList();
+        if (!openUnbypassed.Any()) return;
+
+        _bypassingAll = true;
+        StateHasChanged();
+
+        int succeeded = 0;
+        int failed = 0;
+
+        try
+        {
+            foreach (var zone in openUnbypassed)
+            {
+                if (_cts.IsCancellationRequested) break;
+
+                _busyZones.Add(zone.ZoneNumber);
+                StateHasChanged();
+
+                try
+                {
+                    var result = await PanelCommand.BypassZoneAsync(
+                        SessionId, (byte)PartitionNumber, zone.ZoneNumber, bypass: true);
+
+                    if (result.Success)
+                        succeeded++;
+                    else
+                    {
+                        failed++;
+                        Snackbar.Add($"Zone {zone.ZoneNumber}: {result.ErrorMessage}", Severity.Warning);
+                    }
+                }
+                finally
+                {
+                    _busyZones.Remove(zone.ZoneNumber);
+                }
+            }
+        }
+        finally
+        {
+            _bypassingAll = false;
+            StateHasChanged();
+        }
+
+        if (succeeded > 0)
+            Snackbar.Add($"{succeeded} zone{(succeeded > 1 ? "s" : "")} bypassed", Severity.Success);
+        if (failed > 0)
+            Snackbar.Add($"{failed} zone{(failed > 1 ? "s" : "")} failed to bypass", Severity.Error);
     }
 
     private Color GetZoneColor(ZoneState zone)

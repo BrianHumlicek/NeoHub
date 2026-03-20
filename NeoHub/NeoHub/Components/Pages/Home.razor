@@ -89,7 +89,9 @@
                         <MudCard Elevation="1" Class="mb-3">
                             <MudCardHeader>
                                 <CardHeaderContent>
-                                    <MudText Typo="Typo.h6">@partition.DisplayName</MudText>
+                                    <MudLink Typo="Typo.h6" Href="@($"zones/{sessionId}/{partitionNumber}")" Underline="Underline.Hover" Color="Color.Inherit">
+                                        @partition.DisplayName
+                                    </MudLink>
                                 </CardHeaderContent>
                                 <CardHeaderActions>
                                     <MudChip T="string"

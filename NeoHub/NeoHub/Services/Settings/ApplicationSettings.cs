@@ -18,9 +18,10 @@ namespace NeoHub.Services.Settings
         /// </summary>
         [Display(
             Name = "Default Access Code",
-            Description = "Optional access code for one-touch arm/disarm (leave empty to require code entry)",
+            Description = "Optional access code for one-touch arm/disarm/bypass (leave empty to require code entry)",
             GroupName = "Panel Control",
             Order = 1)]
+        [RegularExpression(@"^\d*$", ErrorMessage = "Access code must contain digits only (0–9)")]
         public string? DefaultAccessCode { get; set; }
 
         /// <summary>

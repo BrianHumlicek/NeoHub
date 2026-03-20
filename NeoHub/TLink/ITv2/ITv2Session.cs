@@ -272,6 +272,13 @@ internal sealed class ITv2Session : IITv2Session
                     await SendSimpleAckAsync(packet.SenderSequence, ct);
                 }
 
+                if (packet.Message is ConnectionEndSession)
+                {
+                    _logger.LogInformation("Received END_SESSION from panel, shutting down");
+                    _shutdownCts.Cancel();
+                    break;
+                }
+
                 if (_pendingReceivers.Any(receiver => receiver.TryReceive(packet)))
                 {
                     CleanupCompletedReceivers();
@@ -544,6 +551,22 @@ internal sealed class ITv2Session : IITv2Session
 
     public async ValueTask DisposeAsync()
     {
+        if (_sessionReady.Task.IsCompletedSuccessfully)
+        {
+            try
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                var senderSeq = GetNextLocalSequence();
+                var packet = new ITv2Packet(senderSeq, _remoteSequence, new ConnectionEndSession());
+                await SendPacketAsync(packet, cts.Token);
+                _logger.LogInformation("END_SESSION sent");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to send END_SESSION (transport may already be closed)");
+            }
+        }
+
         _shutdownCts.Cancel();
 
         _readyTimer?.Dispose();

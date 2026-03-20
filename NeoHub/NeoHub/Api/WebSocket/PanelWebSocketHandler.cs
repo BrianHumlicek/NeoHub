@@ -150,6 +150,10 @@ namespace NeoHub.Api.WebSocket
                         await HandleDisarmCommandAsync(webSocket, disarm, clientId);
                         break;
 
+                    case BypassZoneMessage bypassZone:
+                        await HandleBypassZoneCommandAsync(webSocket, bypassZone, clientId);
+                        break;
+
                     default:
                         _logger.LogWarning("Client {ClientId} sent unknown message type: {MessageType}", clientId, message.GetType().Name);
                         await SendErrorAsync(webSocket, $"Unknown message type: {message.GetType().Name}", clientId);
@@ -196,6 +200,7 @@ namespace NeoHub.Api.WebSocket
                                 Name = kvp.Value.DisplayName,
                                 DeviceClass = DetermineDeviceClass(kvp.Value),
                                 Open = kvp.Value.IsOpen,
+                                Bypassed = kvp.Value.IsBypassed,
                                 Partitions = kvp.Value.Partitions
                             })
                             .ToList()
@@ -244,6 +249,24 @@ namespace NeoHub.Api.WebSocket
             if (!result.Success)
             {
                 await SendErrorAsync(webSocket, result.ErrorMessage ?? "Command failed", clientId);
+            }
+        }
+
+        private async Task HandleBypassZoneCommandAsync(
+            System.Net.WebSockets.WebSocket webSocket,
+            BypassZoneMessage command,
+            string clientId)
+        {
+            _logger.LogInformation(
+                "Client {ClientId} → bypass_zone: Session={SessionId}, Partition={Partition}, Zone={Zone}, Bypass={Bypass}",
+                clientId, command.SessionId, command.PartitionNumber, command.ZoneNumber, command.Bypass);
+
+            var result = await _commandService.BypassZoneAsync(
+                command.SessionId, command.PartitionNumber, command.ZoneNumber, command.Bypass, command.Code);
+
+            if (!result.Success)
+            {
+                await SendErrorAsync(webSocket, result.ErrorMessage ?? "Bypass command failed", clientId);
             }
         }
 
@@ -330,14 +353,15 @@ namespace NeoHub.Api.WebSocket
                 return;
             }
 
-            _logger.LogDebug("Broadcasting zone_update: Session={SessionId}, Zone={Zone}, Open={Open}",
-                e.SessionId, e.Zone.ZoneNumber, e.Zone.IsOpen);
+            _logger.LogDebug("Broadcasting zone_update: Session={SessionId}, Zone={Zone}, Open={Open}, Bypassed={Bypassed}",
+                e.SessionId, e.Zone.ZoneNumber, e.Zone.IsOpen, e.Zone.IsBypassed);
 
             var message = new ZoneUpdateMessage
             {
                 SessionId = e.SessionId,
                 ZoneNumber = e.Zone.ZoneNumber,
-                Open = e.Zone.IsOpen
+                Open = e.Zone.IsOpen,
+                Bypassed = e.Zone.IsBypassed
             };
 
             _ = BroadcastMessageAsync(message);

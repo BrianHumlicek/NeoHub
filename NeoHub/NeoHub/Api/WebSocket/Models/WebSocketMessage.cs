@@ -10,6 +10,7 @@ namespace NeoHub.Api.WebSocket.Models
     [JsonDerivedType(typeof(ArmHomeMessage), "arm_home")]
     [JsonDerivedType(typeof(ArmNightMessage), "arm_night")]
     [JsonDerivedType(typeof(DisarmMessage), "disarm")]
+    [JsonDerivedType(typeof(BypassZoneMessage), "bypass_zone")]
     [JsonDerivedType(typeof(FullStateMessage), "full_state")]
     [JsonDerivedType(typeof(PartitionUpdateMessage), "partition_update")]
     [JsonDerivedType(typeof(ZoneUpdateMessage), "zone_update")]
@@ -32,6 +33,16 @@ namespace NeoHub.Api.WebSocket.Models
     public record ArmNightMessage : ArmCommandMessage;
     public record DisarmMessage : ArmCommandMessage;
 
+    public record BypassZoneMessage : WebSocketMessage
+    {
+        public required string SessionId { get; init; }
+        public required byte PartitionNumber { get; init; }
+        public required byte ZoneNumber { get; init; }
+        /// <summary>true = bypass, false = unbypass</summary>
+        public required bool Bypass { get; init; }
+        public string? Code { get; init; }
+    }
+
     #endregion
 
     #region Server → Client Messages
@@ -53,6 +64,7 @@ namespace NeoHub.Api.WebSocket.Models
         public required string SessionId { get; init; }
         public required byte ZoneNumber { get; init; }
         public required bool Open { get; init; }
+        public required bool Bypassed { get; init; }
     }
 
     public record ErrorMessage : WebSocketMessage
@@ -85,6 +97,7 @@ namespace NeoHub.Api.WebSocket.Models
         public required string Name { get; init; }
         public required string DeviceClass { get; init; }
         public required bool Open { get; init; }
+        public required bool Bypassed { get; init; }
         public required List<byte> Partitions { get; init; }
     }
 

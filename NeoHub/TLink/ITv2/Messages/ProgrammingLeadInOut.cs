@@ -1,4 +1,5 @@
-﻿using DSC.TLink.Serialization;
+using DSC.TLink.ITv2.Enumerations;
+using DSC.TLink.Serialization;
 
 namespace DSC.TLink.ITv2.Messages
 {
@@ -27,13 +28,5 @@ namespace DSC.TLink.ITv2.Messages
             Dls = 3,
             C24 = 4
         }
-        public enum ProgrammingMode : byte
-        {
-            InstallersProgramming = 0,
-            AccessCodeProgramming = 1,
-            UserFunctionProgramming = 2,
-            UserBypassProgramming = 3
-        }
-
     }
 }

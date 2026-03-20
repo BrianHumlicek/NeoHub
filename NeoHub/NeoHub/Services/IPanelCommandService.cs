@@ -11,6 +11,7 @@ namespace NeoHub.Services
     {
         Task<PanelCommandResult> ArmAsync(string sessionId, byte partition, ArmingMode mode, string? accessCode = null);
         Task<PanelCommandResult> DisarmAsync(string sessionId, byte partition, string? accessCode = null);
+        Task<PanelCommandResult> BypassZoneAsync(string sessionId, byte partition, byte zoneNumber, bool bypass, string? accessCode = null);
     }
 
     public record PanelCommandResult
