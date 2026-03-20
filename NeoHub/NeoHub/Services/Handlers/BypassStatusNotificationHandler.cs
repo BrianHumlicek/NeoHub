@@ -1,3 +1,4 @@
+using DSC.TLink.ITv2.Enumerations;
 using DSC.TLink.ITv2.MediatR;
 using DSC.TLink.ITv2.Messages;
 using MediatR;
@@ -34,7 +35,7 @@ namespace NeoHub.Services.Handlers
             var zone = _service.GetZone(sessionId, msg.ZoneNumber)
                 ?? new ZoneState { ZoneNumber = msg.ZoneNumber };
 
-            zone.IsBypassed = msg.BypassStatus == SingleZoneBypassStatus.BypassStatusEnum.Bypassed;
+            zone.IsBypassed = msg.BypassStatus == BypassStatusEnum.Bypassed;
             zone.LastUpdated = notification.ReceivedAt;
 
             _logger.LogDebug(
