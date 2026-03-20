@@ -80,8 +80,8 @@ namespace NeoHub.Services
             {
                 Partition = partition,
                 ProgrammingMode = ProgrammingMode.UserBypassProgramming,
-                AccessCode = ToRawDigitBytes(code),
-                AccessMode = ProgrammingAccessMode.UserCode,
+                AccessCode = code,
+                ReadWrite = ConfigurationEnter.ReadWriteAccessEnum.ReadWriteMode
             });
 
             if (!enterResult.Success)
@@ -97,7 +97,7 @@ namespace NeoHub.Services
                 {
                     Partition = partition,
                     ZoneNumber = zoneNumber,
-                    BypassState = bypass ? (byte)0x01 : (byte)0x00,
+                    BypassState = bypass ? BypassStatusEnum.Bypassed : BypassStatusEnum.NotBypassed,
                 });
             }
             finally
@@ -109,10 +109,6 @@ namespace NeoHub.Services
 
             return bypassResult;
         }
-
-        private static byte[] ToRawDigitBytes(string code)
-            => code.Where(char.IsDigit).Select(c => (byte)(c - '0')).ToArray();
-
         private async Task<PanelCommandResult> SendCommandAsync(string sessionId, IMessageData message)
         {
             try

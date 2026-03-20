@@ -37,8 +37,6 @@ namespace DSC.TLink.ITv2.Messages
 
         [CompactInteger]
         public int ZoneNumber { get; init; }
-
-        /// <summary>0x01 = bypass, 0x00 = unbypass.</summary>
-        public byte BypassState { get; init; }
+        public BypassStatusEnum BypassState { get; init; }
     }
 }

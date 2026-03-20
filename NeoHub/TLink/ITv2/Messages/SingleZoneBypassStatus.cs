@@ -39,11 +39,5 @@ namespace DSC.TLink.ITv2.Messages
 		/// 1 = zone is bypassed (excluded from monitoring).
 		/// </summary>
 		public BypassStatusEnum BypassStatus { get; init; }
-
-        public enum BypassStatusEnum : byte
-        {
-            NotBypassed = 0,
-            Bypassed = 1
-        }
     }
 }

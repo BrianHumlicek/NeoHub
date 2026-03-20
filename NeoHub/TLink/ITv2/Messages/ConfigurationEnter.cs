@@ -38,15 +38,20 @@ namespace DSC.TLink.ITv2.Messages
         [CompactInteger]
         public int Partition { get; init; }
 
-        public ProgrammingMode ProgrammingMode { get; init; } = ProgrammingMode.UserBypassProgramming;
+        public ProgrammingMode ProgrammingMode { get; init; }
 
         /// <summary>
         /// Access code as raw digit bytes (one byte per digit, value 0–9).
         /// Serialized with a single leading length byte: [len][digits...].
         /// </summary>
-        [LeadingLengthArray(lengthBytes: 1)]
-        public byte[] AccessCode { get; init; } = Array.Empty<byte>();
+        [LeadingLengthBCDString]
+        public string AccessCode { get; init; } = string.Empty;
 
-        public ProgrammingAccessMode AccessMode { get; init; } = ProgrammingAccessMode.UserCode;
+        public ReadWriteAccessEnum ReadWrite { get; init; }
+        public enum ReadWriteAccessEnum : byte
+        {
+            ReadOnlyMode,
+            ReadWriteMode
+        }
     }
 }
