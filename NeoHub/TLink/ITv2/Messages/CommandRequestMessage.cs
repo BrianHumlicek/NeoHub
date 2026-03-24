@@ -6,7 +6,5 @@ namespace DSC.TLink.ITv2.Messages
     public record CommandRequestMessage : CommandMessageBase
     {
         public IMessageData Request { get; init; }
-        //public ITv2Command CommandRequest { get; init; }
-        //public byte[] Data { get; init; } = Array.Empty<byte>();
     }
 }
