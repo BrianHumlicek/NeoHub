@@ -211,8 +211,12 @@
         InvokeAsync(() =>
         {
             if (_cts.IsCancellationRequested) return;
-            LoadData();
-            StateHasChanged();
+            try
+            {
+                LoadData();
+                StateHasChanged();
+            }
+            catch (ObjectDisposedException) { }
         });
     }
 

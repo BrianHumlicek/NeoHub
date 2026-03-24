@@ -213,6 +213,7 @@
     private string? expandedLogs;
     private bool saving;
     private Timer? _refreshTimer;
+    private bool _disposed;
 
     protected override void OnInitialized()
     {
@@ -231,16 +232,26 @@
     {
         InvokeAsync(() =>
         {
-            RefreshData();
-            UpdateRefreshTimer();
-            StateHasChanged();
+            if (_disposed) return;
+            try
+            {
+                RefreshData();
+                UpdateRefreshTimer();
+                StateHasChanged();
+            }
+            catch (ObjectDisposedException) { }
         });
     }
 
     private void UpdateRefreshTimer()
     {
         if (activeSessions.Any())
-            _refreshTimer ??= new Timer(_ => InvokeAsync(StateHasChanged), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+            _refreshTimer ??= new Timer(_ => InvokeAsync(() =>
+            {
+                if (_disposed) return;
+                try { StateHasChanged(); }
+                catch (ObjectDisposedException) { }
+            }), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
         else
         {
             _refreshTimer?.Dispose();
@@ -382,6 +393,7 @@
 
     public void Dispose()
     {
+        _disposed = true;
         _refreshTimer?.Dispose();
         SessionMonitor.SessionsChanged -= OnSessionsChanged;
     }

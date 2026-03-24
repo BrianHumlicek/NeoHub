@@ -270,6 +270,8 @@
 	private bool showDisarmDialog;
 	private Timer? _clockTimer;
 
+	private bool _disposed;
+
 	protected override void OnInitialized()
 	{
 		RefreshSessions();
@@ -278,21 +280,36 @@
 		PanelState.PartitionStateChanged += OnStateChanged;
 		PanelState.ZoneStateChanged += OnStateChanged;
 
-		_clockTimer = new Timer(_ => InvokeAsync(StateHasChanged), null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
+		_clockTimer = new Timer(_ => InvokeAsync(() =>
+		{
+			if (_disposed) return;
+			try { StateHasChanged(); }
+			catch (ObjectDisposedException) { }
+		}), null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
 	}
 
 	private void OnSessionsChanged()
 	{
 		InvokeAsync(() =>
 		{
-			RefreshSessions();
-			StateHasChanged();
+			if (_disposed) return;
+			try
+			{
+				RefreshSessions();
+				StateHasChanged();
+			}
+			catch (ObjectDisposedException) { }
 		});
 	}
 
 	private void OnStateChanged(object? sender, EventArgs e)
 	{
-		InvokeAsync(StateHasChanged);
+		InvokeAsync(() =>
+		{
+			if (_disposed) return;
+			try { StateHasChanged(); }
+			catch (ObjectDisposedException) { }
+		});
 	}
 
 	private void RefreshSessions()
@@ -447,6 +464,7 @@
 
 	public void Dispose()
 	{
+		_disposed = true;
 		_clockTimer?.Dispose();
 		SessionMonitor.SessionsChanged -= OnSessionsChanged;
 		PanelState.SessionStateChanged -= OnStateChanged;

@@ -187,6 +187,7 @@
     private readonly List<DiagnosticsLogEntry> _rawLogEntries = new(300);
     private bool _tlinkOnly = true;
     private bool _autoScroll = true;
+    private bool _disposed;
 
     private static readonly IReadOnlyList<MessageTypeInfo> _catalog = MessageCatalog.GetSendable();
 
@@ -217,8 +218,13 @@
     {
         InvokeAsync(() =>
         {
-            RefreshSessions();
-            StateHasChanged();
+            if (_disposed) return;
+            try
+            {
+                RefreshSessions();
+                StateHasChanged();
+            }
+            catch (ObjectDisposedException) { }
         });
     }
 
@@ -226,10 +232,15 @@
     {
         InvokeAsync(() =>
         {
-            _rawLogEntries.Add(entry);
-            if (_rawLogEntries.Count > 300)
-                _rawLogEntries.RemoveAt(0);
-            StateHasChanged();
+            if (_disposed) return;
+            try
+            {
+                _rawLogEntries.Add(entry);
+                if (_rawLogEntries.Count > 300)
+                    _rawLogEntries.RemoveAt(0);
+                StateHasChanged();
+            }
+            catch (ObjectDisposedException) { }
         });
     }
 
@@ -279,7 +290,9 @@
     {
         if (prop.PropertyType.IsEnum)
             return Enum.GetNames(prop.PropertyType).FirstOrDefault() ?? string.Empty;
-        if (prop.PropertyType == typeof(string) || prop.PropertyType == typeof(byte[]))
+        if (prop.PropertyType == typeof(string) || prop.PropertyType == typeof(byte[]) || IsValueTypeArray(prop.PropertyType))
+            return string.Empty;
+        if (Nullable.GetUnderlyingType(prop.PropertyType) is not null)
             return string.Empty;
         return "0";
     }
@@ -331,9 +344,15 @@
         }
         else
         {
-            var helperText = prop.PropertyType == typeof(byte[]) ? "Space-separated hex bytes" : null;
-            var placeholder = prop.PropertyType == typeof(byte[]) ? "01 FF 3A" : null;
-            var label = prop.PropertyType == typeof(byte[]) || prop.PropertyType == typeof(string)
+            var isHexArray = prop.PropertyType == typeof(byte[]);
+            var isValueArray = IsValueTypeArray(prop.PropertyType);
+            var helperText = isHexArray ? "Space-separated hex bytes"
+                : isValueArray ? "Comma-separated values"
+                : null;
+            var placeholder = isHexArray ? "01 FF 3A"
+                : isValueArray ? "1, 2, 3"
+                : null;
+            var label = isHexArray || isValueArray || prop.PropertyType == typeof(string)
                 ? name
                 : $"{name} ({GetTypeLabel(prop.PropertyType)})";
 
@@ -427,6 +446,7 @@
         if (underlying is not null && string.IsNullOrWhiteSpace(str)) return null;
         if (targetType == typeof(string)) return str;
         if (targetType == typeof(byte[])) return ParseHex(str);
+        if (IsValueTypeArray(type)) return ParseValueArray(type.GetElementType()!, str);
         if (targetType.IsEnum) return Enum.Parse(targetType, str);
         if (string.IsNullOrWhiteSpace(str)) return Activator.CreateInstance(targetType);
 
@@ -459,6 +479,18 @@
             .ToArray();
     }
 
+    private static Array ParseValueArray(Type elementType, string input)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+            return Array.CreateInstance(elementType, 0);
+
+        var tokens = input.Split(new[] { ' ', ',' }, StringSplitOptions.RemoveEmptyEntries);
+        var arr = Array.CreateInstance(elementType, tokens.Length);
+        for (int i = 0; i < tokens.Length; i++)
+            arr.SetValue(Convert.ChangeType(tokens[i].Trim(), elementType), i);
+        return arr;
+    }
+
     private void ResetForm() => OnMessageTypeSelected(_selectedType);
 
     private void ClearLog() => _rawLogEntries.Clear();
@@ -477,7 +509,10 @@
     }
 
     private static bool IsComplexType(Type t) =>
-        t.IsClass && t != typeof(string) && t != typeof(byte[]);
+        t.IsClass && t != typeof(string) && t != typeof(byte[]) && !IsValueTypeArray(t);
+
+    private static bool IsValueTypeArray(Type t) =>
+        t.IsArray && t != typeof(byte[]) && t.GetElementType()!.IsValueType;
 
     private static string GetTypeLabel(Type t) => Type.GetTypeCode(t) switch
     {
@@ -508,6 +543,7 @@
 
     public void Dispose()
     {
+        _disposed = true;
         SessionMonitor.SessionsChanged -= OnSessionsChanged;
         LogService.LogReceived -= OnLogReceived;
     }
