@@ -303,8 +303,10 @@ namespace DSC.TLink.Serialization
 
         private static TypePlan BuildPlan(Type type)
         {
-            var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                .Where(p => p.CanRead && p.CanWrite && !p.IsDefined(typeof(IgnorePropertyAttribute), false))
+            var properties = type.GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                .Where(p => p.CanRead && p.CanWrite
+                    && !p.IsDefined(typeof(IgnorePropertyAttribute), false)
+                    && (p.GetMethod!.IsPublic || p.GetMethod.IsAssembly))
                 .OrderBy(p => p.MetadataToken)
                 .ToArray();
 
