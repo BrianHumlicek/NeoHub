@@ -384,7 +384,7 @@ internal sealed class ITv2Session : IITv2Session
             {
                 var cmdSeq = GetNextCommandSequence();
                 cmd.CommandSequence = cmdSeq;
-                receiver = MessageReceiver.CreateCommandReceiver(senderSeq, cmdSeq);
+                receiver = MessageReceiver.CreateCommandReceiver(senderSeq, cmdSeq, cmd.Command);
             }
             else
             {
@@ -490,9 +490,13 @@ internal sealed class ITv2Session : IITv2Session
         }
         catch (Exception ex)
         {
+            var detail = ex is TypeInitializationException { InnerException: { } inner }
+                ? $"{ex.Message} → {inner.Message}"
+                : ex.Message;
+
             return Result<ITv2Packet>.Fail(
                 TLinkErrorCode.PacketParseError,
-                $"Failed to parse ITv2 packet: {ex.Message}");
+                $"Failed to parse ITv2 packet: {detail}");
         }
     }
 

@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+using DSC.TLink.ITv2.Enumerations;
 using DSC.TLink.ITv2.Messages;
 
 namespace DSC.TLink.ITv2;
@@ -37,28 +38,50 @@ internal sealed class MessageReceiver : IMessageReceiver
 {
     private readonly byte _senderSequence;
     private readonly byte? _commandSequence;
+    private readonly ITv2Command? _senderCommandType;
+    private readonly ITv2Command? _receiveCommandType;
     private readonly TaskCompletionSource<IMessageData?> _tcs;
 
-    private MessageReceiver(byte senderSequence, byte? commandSequence)
+    private MessageReceiver(byte senderSequence, byte? commandSequence, ITv2Command? command)
     {
         _senderSequence = senderSequence;
         _commandSequence = commandSequence;
+        if (command.HasValue)
+        {
+            _senderCommandType = command.Value;
+            _receiveCommandType = (ITv2Command)((int)command | 0x4000);
+        }
         _tcs = new TaskCompletionSource<IMessageData?>(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
     public static MessageReceiver CreateNotificationReceiver(byte senderSequence)
-        => new(senderSequence, commandSequence: null);
+        => new(senderSequence, commandSequence: null, command: null);
 
-    public static MessageReceiver CreateCommandReceiver(byte senderSequence, byte commandSequence)
-        => new(senderSequence, commandSequence);
+    public static MessageReceiver CreateCommandReceiver(byte senderSequence, byte commandSequence, ITv2Command command)
+        => new(senderSequence, commandSequence, command);
 
     public bool TryReceive(ITv2Packet packet)
     {
-        if (packet.ReceiverSequence == _senderSequence && packet.Message is SimpleAck)
+        if (packet.ReceiverSequence == _senderSequence)
         {
-            if (_commandSequence is null)
+            if (packet.Message is CommandError errorMessage && errorMessage.NackCommand == _senderCommandType)
+            {
+                _tcs.TrySetResult(packet.Message);
+                return true;
+            }
+            //This appears to be a sequencing strategy in addition to command sequence.
+            //Message responses have have bit18 set in the command byte to indicate it is a response
+            if (packet.Message is not SimpleAck && packet.Message.Command == _receiveCommandType)
+            {
+                _tcs.TrySetResult(packet.Message);
+                return true;
+            }
+            //SimpleAck is sufficient to complete a non-command sequence transaction eg: a notification
+            if (packet.Message is SimpleAck && _commandSequence is null)
+            {
                 _tcs.TrySetResult(null);
-            return true;
+                return true;
+            }
         }
 
         if (packet.Message is ICommandMessage commandMessage)
