@@ -32,7 +32,7 @@ namespace DSC.TLink.ITv2.Messages
                     if (commandLookupBuilder.ContainsKey(command))
                     {
                         throw new InvalidOperationException(
-                            $"Duplicate ITv2CommandAttribute found for command '{command}'. " +
+                            $"Duplicate ITv2CommandAttribute for command '{command}' (0x{(ushort)command:X4}). " +
                             $"Types '{commandLookupBuilder[command].FullName}' and '{type.FullName}' both declare this command.");
                     }
 
