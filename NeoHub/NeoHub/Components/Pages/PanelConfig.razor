@@ -1,0 +1,386 @@
+@page "/panel-config"
+@using NeoHub.Services
+@using NeoHub.Services.Models
+@using NeoHub.Services.Settings
+@using NeoHub.Services.PanelConfiguration
+@using NeoHub.Services.PanelConfiguration.Sections
+@using DSC.TLink.ITv2.MediatR
+@using Microsoft.Extensions.Options
+@inject IPanelStateService PanelState
+@inject IPanelConfigurationService ConfigService
+@inject IITv2SessionManager SessionManager
+@inject ISessionMonitor SessionMonitor
+@inject IOptionsMonitor<ApplicationSettings> AppSettings
+@inject IDialogService DialogService
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+<PageTitle>Panel Configuration</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
+
+    @if (_config is null)
+    {
+        @if (_isReading)
+        {
+            <MudStack AlignItems="AlignItems.Center" Class="mt-8">
+                <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+                <MudText Typo="Typo.h6" Color="Color.Secondary">Reading panel configuration…</MudText>
+            </MudStack>
+        }
+        else
+        {
+            <MudAlert Severity="Severity.Info" Class="mt-4">
+                Waiting for configuration data. The installer code dialog should have appeared automatically.
+            </MudAlert>
+        }
+    }
+    else
+    {
+        @* ── Header ── *@
+        <MudPaper Class="pa-3 mb-4">
+            <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
+                <MudStack Row="true" Spacing="4" AlignItems="AlignItems.Center">
+                    <MudIcon Icon="@Icons.Material.Filled.Build" Size="Size.Large" />
+                    <div>
+                        <MudText Typo="Typo.h5">Panel Configuration</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                            Session: @_sessionId
+                            @if (_config.LastReadAt is not null)
+                            {
+                                <text> · Read @_config.LastReadAt.Value.ToLocalTime().ToString("HH:mm:ss")</text>
+                            }
+                            · @_config.Capabilities.MaxZones zones · @_config.Capabilities.MaxPartitions partitions
+                        </MudText>
+                    </div>
+                </MudStack>
+                <MudStack Row="true" Spacing="2">
+                    <MudButton Variant="Variant.Outlined"
+                               StartIcon="@Icons.Material.Filled.Download"
+                               OnClick="ReadAllAsync"
+                               Disabled="@_isReading"
+                               Loading="@_isReading">
+                        Load
+                    </MudButton>
+                    <MudButton Variant="Variant.Outlined"
+                               StartIcon="@Icons.Material.Filled.Save"
+                               Disabled="true">
+                        Save
+                    </MudButton>
+                    <MudButton Variant="Variant.Outlined"
+                               StartIcon="@Icons.Material.Filled.Print"
+                               Disabled="true">
+                        Print
+                    </MudButton>
+                </MudStack>
+            </MudStack>
+        </MudPaper>
+
+        @* ── Tabs ── *@
+        <MudTabs Elevation="1" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-4">
+            @* ══ ZONES TAB ══ *@
+            <MudTabPanel Text="Zones" Icon="@Icons.Material.Filled.Sensors">
+                <div style="overflow-x: auto;">
+                    <MudSimpleTable Dense="true" Hover="true" FixedHeader="true" Style="max-height: 70vh;">
+                        <thead>
+                            <tr>
+                                <th style="width:50px;">#</th>
+                                <th style="min-width:200px;">Label</th>
+                                <th style="min-width:150px;">Definition</th>
+                                <th style="min-width:180px;">Attributes</th>
+                                <th style="min-width:80px;">Partitions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @{
+                                var zoneLabels = _config.ZoneLabels.Values;
+                                var zoneValues = _config.ZoneDefinitions.Values;
+                                var zoneAttrs = _config.ZoneAttributes.Values;
+                                var assignments = _config.ZoneAssignments.Values;
+                                int maxPartitions = _config.Capabilities.MaxPartitions;
+                                int maxZones = _config.Capabilities.MaxZones;
+                            }
+                            @for (int z = 0; z < maxZones; z++)
+                            {
+                                var zoneNum = z + 1;
+                                var def = z < zoneValues.Count ? zoneValues[z] : ZoneDefinition.NullZone;
+                                var label = z < zoneLabels.Count ? zoneLabels[z] : null;
+                                var attrs = z < zoneAttrs.Count ? zoneAttrs[z] : (ZoneAttributes)0;
+                                var isNull = def == ZoneDefinition.NullZone;
+
+                                <tr style="@(isNull ? "opacity: 0.4;" : "") cursor: pointer;"
+                                    @onclick="@(() => EditZoneAsync(zoneNum))">
+                                    <td><strong>@zoneNum</strong></td>
+                                    <td style="font-family: 'Courier New', monospace; font-size: 0.85em;">
+                                        @if (!string.IsNullOrEmpty(label))
+                                        {
+                                            @FormatLabelLine1(label)<br />@FormatLabelLine2(label)
+                                        }
+                                    </td>
+                                    <td>@(isNull ? "—" : FormatEnumName(def.ToString()))</td>
+                                    <td style="font-size: 0.8em;">@FormatAttributes(attrs)</td>
+                                    <td>
+                                        <div style="display: flex; gap: 4px; align-items: center;">
+                                            @for (int p = 0; p < maxPartitions; p++)
+                                            {
+                                                var pIdx = p;
+                                                var zIdx = z;
+                                                var assigned = pIdx < assignments.GetLength(0) && zIdx < assignments.GetLength(1) && assignments[pIdx, zIdx];
+                                                var bg = assigned ? "#4caf50" : "#9e9e9e";
+                                                var op = assigned ? "1" : "0.2";
+                                                <div style="width:12px; height:12px; border-radius:50%; background:@bg; opacity:@op;"
+                                                     title="@($"P{pIdx + 1}: {(assigned ? "Assigned" : "Not assigned")}")"></div>
+                                            }
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                </div>
+            </MudTabPanel>
+
+            @* ══ PARTITIONS TAB ══ *@
+            <MudTabPanel Text="Partitions" Icon="@Icons.Material.Filled.Shield">
+                <div style="overflow-x: auto;">
+                    <MudSimpleTable Dense="true" Hover="true" FixedHeader="true" Style="max-height: 70vh;">
+                        <thead>
+                            <tr>
+                                <th style="width:50px;">#</th>
+                                <th style="min-width:200px;">Label</th>
+                                <th style="min-width:100px;">Status</th>
+                                <th style="min-width:100px;">Zones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @{
+                                var partLabels = _config.PartitionLabels.Values;
+                                var partEnables = _config.PartitionEnables.Values;
+                                var partAssignments = _config.ZoneAssignments.Items;
+                            }
+                            @for (int p = 0; p < partEnables.Count; p++)
+                            {
+                                var partNum = p + 1;
+                                var label = p < partLabels.Count ? partLabels[p] : null;
+                                var enabled = partEnables[p];
+                                var assignedZones = partAssignments.FirstOrDefault(a => a.Partition == partNum).Zones;
+                                var zoneCount = assignedZones?.Length ?? 0;
+
+                                <tr style="cursor: pointer;" @onclick="@(() => EditPartitionAsync(partNum))">
+                                    <td><strong>@partNum</strong></td>
+                                    <td style="font-family: 'Courier New', monospace; font-size: 0.85em;">
+                                        @if (!string.IsNullOrEmpty(label))
+                                        {
+                                            @FormatLabelLine1(label)<br />@FormatLabelLine2(label)
+                                        }
+                                    </td>
+                                    <td>
+                                        <MudChip T="string" Size="Size.Small"
+                                                 Color="@(enabled == PartitionEnable.Enabled ? Color.Success : Color.Default)">
+                                            @enabled
+                                        </MudChip>
+                                    </td>
+                                    <td>@zoneCount zones</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                </div>
+            </MudTabPanel>
+
+            @* ══ SYSTEM TAB ══ *@
+            <MudTabPanel Text="System" Icon="@Icons.Material.Filled.SettingsApplications">
+                <MudAlert Severity="Severity.Info" Class="mt-2">
+                    No system-level parameters defined yet. Future firmware and system settings will appear here.
+                </MudAlert>
+            </MudTabPanel>
+        </MudTabs>
+    }
+</MudContainer>
+
+@code {
+    private List<string> _activeSessions = new();
+    private string? _sessionId;
+    private PanelConfigurationState? _config;
+    private bool _isReading;
+    private bool _disposed;
+    private bool _promptShown;
+
+    protected override void OnInitialized()
+    {
+        RefreshSessions();
+        SessionMonitor.SessionsChanged += OnSessionsChanged;
+        PanelState.SessionStateChanged += OnStateChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_promptShown)
+        {
+            _promptShown = true;
+
+            if (_sessionId is null)
+            {
+                Snackbar.Add("No active panel session", Severity.Warning);
+                Navigation.NavigateTo("/connections");
+                return;
+            }
+
+            var session = PanelState.GetSession(_sessionId);
+            _config = session?.Configuration;
+
+            if (_config is not null)
+            {
+                StateHasChanged();
+                return;
+            }
+
+            // Need to read config — auto-prompt for installer code if needed
+            await ReadAllAsync();
+        }
+    }
+
+    private void RefreshSessions()
+    {
+        _activeSessions = SessionManager.GetActiveSessions().ToList();
+        if (_sessionId is null || !_activeSessions.Contains(_sessionId))
+            _sessionId = _activeSessions.FirstOrDefault();
+    }
+
+    private void OnSessionsChanged()
+    {
+        InvokeAsync(() =>
+        {
+            if (_disposed) return;
+            try { RefreshSessions(); StateHasChanged(); }
+            catch (ObjectDisposedException) { }
+        });
+    }
+
+    private void OnStateChanged(object? sender, EventArgs e)
+    {
+        InvokeAsync(() =>
+        {
+            if (_disposed) return;
+            try
+            {
+                var session = _sessionId is not null ? PanelState.GetSession(_sessionId) : null;
+                _config = session?.Configuration;
+                StateHasChanged();
+            }
+            catch (ObjectDisposedException) { }
+        });
+    }
+
+    private async Task ReadAllAsync()
+    {
+        if (_sessionId is null) return;
+
+        var session = PanelState.GetSession(_sessionId);
+        var code = AppSettings.CurrentValue.DefaultInstallerCode;
+
+        if (string.IsNullOrEmpty(code) && session?.IsInProgrammingMode != true)
+        {
+            code = await PromptForInstallerCodeAsync();
+            if (string.IsNullOrEmpty(code))
+            {
+                Navigation.NavigateTo("/");
+                return;
+            }
+        }
+
+        _isReading = true;
+        StateHasChanged();
+
+        try
+        {
+            var result = await ConfigService.ReadAllAsync(_sessionId, code!, CancellationToken.None);
+            if (result.Success)
+            {
+                _config = PanelState.GetSession(_sessionId)?.Configuration;
+                Snackbar.Add("Configuration loaded", Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add($"Failed to read configuration: {result.ErrorMessage}", Severity.Error);
+                Navigation.NavigateTo("/");
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isReading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task<string?> PromptForInstallerCodeAsync()
+    {
+        var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.ExtraSmall, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<InstallerCodeDialog>("Enter Installer Code", new DialogParameters<InstallerCodeDialog>(), options);
+        var result = await dialog.Result;
+        return result?.Canceled == false ? result.Data as string : null;
+    }
+
+    private async Task EditZoneAsync(int zoneNumber)
+    {
+        if (_config is null) return;
+
+        var parameters = new DialogParameters<ZoneEditDialog>
+        {
+            { x => x.ZoneNumber, zoneNumber },
+            { x => x.Config, _config }
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true };
+        await DialogService.ShowAsync<ZoneEditDialog>($"Zone {zoneNumber}", parameters, options);
+    }
+
+    private async Task EditPartitionAsync(int partitionNumber)
+    {
+        if (_config is null) return;
+
+        var parameters = new DialogParameters<PartitionEditDialog>
+        {
+            { x => x.PartitionNumber, partitionNumber },
+            { x => x.Config, _config }
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true };
+        await DialogService.ShowAsync<PartitionEditDialog>($"Partition {partitionNumber}", parameters, options);
+    }
+
+    private static string FormatLabelLine1(string label) =>
+        label.Length >= 14 ? label[..14].TrimEnd() : label.TrimEnd();
+
+    private static string FormatLabelLine2(string label) =>
+        label.Length > 14 ? label[14..Math.Min(28, label.Length)].TrimEnd() : "";
+
+    private static string FormatEnumName(string name) =>
+        System.Text.RegularExpressions.Regex.Replace(name, @"(\p{Ll})(\p{Lu})", "$1 $2")
+            .Replace("24 Hour", "24-Hour");
+
+    private static string FormatAttributes(ZoneAttributes attrs)
+    {
+        if (attrs == 0) return "—";
+        var flags = new List<string>();
+        foreach (ZoneAttributes flag in Enum.GetValues<ZoneAttributes>())
+        {
+            if (flag == 0) continue;
+            // Only show individual bit flags, not combinations
+            if ((flag & (flag - 1)) != 0) continue;
+            if (attrs.HasFlag(flag))
+                flags.Add(FormatEnumName(flag.ToString()).Replace("Is ", ""));
+        }
+        return flags.Count > 0 ? string.Join(", ", flags) : $"0x{(ushort)attrs:X4}";
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        SessionMonitor.SessionsChanged -= OnSessionsChanged;
+        PanelState.SessionStateChanged -= OnStateChanged;
+    }
+}

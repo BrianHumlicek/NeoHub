@@ -25,6 +25,19 @@ namespace NeoHub.Services.Settings
         public string? DefaultAccessCode { get; set; }
 
         /// <summary>
+        /// Default installer code for automatic panel configuration reading on connect (optional).
+        /// If set, the full installer configuration (zone definitions, attributes, etc.) is
+        /// read automatically when a panel session connects.
+        /// </summary>
+        [Display(
+            Name = "Default Installer Code",
+            Description = "Optional installer code for automatic configuration pull on connect (leave empty to skip)",
+            GroupName = "Panel Control",
+            Order = 2)]
+        [RegularExpression(@"^\d*$", ErrorMessage = "Installer code must contain digits only (0–9)")]
+        public string? DefaultInstallerCode { get; set; }
+
+        /// <summary>
         /// TCP port for panel connections (default: 3072)
         /// </summary>
         [Display(

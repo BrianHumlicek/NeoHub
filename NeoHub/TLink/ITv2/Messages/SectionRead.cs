@@ -1,9 +1,4 @@
 ﻿using DSC.TLink.Serialization;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace DSC.TLink.ITv2.Messages
 {
@@ -20,9 +15,7 @@ namespace DSC.TLink.ITv2.Messages
         [IgnoreProperty]
         public int? Module { get; set; }
         [IgnoreProperty]
-        public ushort Section { get; set; }
-        [IgnoreProperty]
-        public ushort[] Sections { get; set; } = Array.Empty<ushort>();
+        public ushort[] SectionAddress { get; set; } = Array.Empty<ushort>();
         [IgnoreProperty]
         public byte Index { get; set; } = 0;
         [IgnoreProperty]
@@ -32,7 +25,7 @@ namespace DSC.TLink.ITv2.Messages
 
         private void DecodeMessageBytes(byte[] messageBytes)
         {
-            int encodedLength = 3;
+            int encodedLength = 1;
             if (messageBytes.Length < encodedLength) throw new ArgumentException("Message bytes too short to decode", nameof(messageBytes));
 
             int index = 0;
@@ -42,8 +35,10 @@ namespace DSC.TLink.ITv2.Messages
             if (_encoding.HasFlag(MessageEncodingFlags.ModuleNumberIsUsed))
                 encodedLength++;
 
-            int sectionsLength = ((byte)_encoding >> 4) & 0x07;
-            encodedLength += sectionsLength * 2;
+            int sectionAddressLength = 1;
+            sectionAddressLength += ((byte)_encoding >> 4) & 0x07;
+
+            encodedLength += sectionAddressLength * 2;
 
             if (_encoding.HasFlag(MessageEncodingFlags.IndexIsUsed))
                 encodedLength++;
@@ -57,13 +52,11 @@ namespace DSC.TLink.ITv2.Messages
                 Module = messageBytes[index++];
             }
 
-            Section = (ushort)(messageBytes[index++] << 8 | messageBytes[index++]);
+            SectionAddress = new ushort[sectionAddressLength];
 
-            Sections = new ushort[sectionsLength];
-
-            for (int i = 0; i < sectionsLength; i++)
+            for (int i = 0; i < sectionAddressLength; i++)
             {
-                Sections[i] = (ushort)(messageBytes[index++] << 8 | messageBytes[index++]);
+                SectionAddress[i] = (ushort)(messageBytes[index++] << 8 | messageBytes[index++]);
             }
 
             if ( _encoding.HasFlag(MessageEncodingFlags.IndexIsUsed))
@@ -92,27 +85,27 @@ namespace DSC.TLink.ITv2.Messages
                 encoding |= MessageEncodingFlags.IndexIsUsed;
             if (useCount)
                 encoding |= MessageEncodingFlags.CountIsUsed;
+            if (SectionAddress.Length < 1)
+                throw new InvalidOperationException("At least one section address part is required");
+            if (SectionAddress.Length > 8)
+                throw new InvalidOperationException("Cannot encode more than 8 section address words");
             
-            if (Sections.Length > 7)
-                throw new InvalidOperationException("Cannot encode more than 8 subsections");
-            
-            encoding |= (MessageEncodingFlags)(Sections.Length << 4);
+            encoding |= (MessageEncodingFlags)((SectionAddress.Length - 1) << 4);
             
             bytes.Add((byte)encoding);
 
             if (Module.HasValue)
                 bytes.Add((byte)Module.Value);
 
-            bytes.Add((byte)(Section >> 8));
-            bytes.Add((byte)(Section & 0xFF));
-
-            foreach (var section in Sections)
+            foreach (var addressWord in SectionAddress)
             {
-                bytes.Add((byte)(section >> 8));
-                bytes.Add((byte)(section & 0xFF));
+                bytes.Add((byte)(addressWord >> 8));
+                bytes.Add((byte)(addressWord & 0xFF));
             }
-            if (useIndex) bytes.Add(Index);
-            if (useCount) bytes.Add((byte)(Count - 1));
+            if (useIndex)
+                bytes.Add(Index);
+            if (useCount)
+                bytes.Add(Count);
             
             if (SectionData != null && SectionData.Length > 0)
             {

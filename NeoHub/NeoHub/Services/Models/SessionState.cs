@@ -1,3 +1,5 @@
+using NeoHub.Services.PanelConfiguration;
+
 namespace NeoHub.Services.Models
 {
     /// <summary>
@@ -11,6 +13,18 @@ namespace NeoHub.Services.Models
         public int MaxPartitions { get; set; }
         public Dictionary<byte, PartitionState> Partitions { get; } = new();
         public Dictionary<byte, ZoneState> Zones { get; } = new();
+
+        /// <summary>
+        /// Installer configuration data read via SectionRead.
+        /// Null until a config read is explicitly triggered by the user.
+        /// </summary>
+        public PanelConfigurationState? Configuration { get; set; }
+
+        /// <summary>
+        /// Whether the panel is currently in installer programming mode.
+        /// Tracked via ProgrammingLeadInOut notifications from the panel.
+        /// </summary>
+        public bool IsInProgrammingMode { get; set; }
 
         /// <summary>
         /// When this session was established.

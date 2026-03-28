@@ -5,6 +5,7 @@ using NeoHub.Services;
 using NeoHub.Services.Settings;
 using NeoHub.Services.Diagnostics;
 using NeoHub.Api.WebSocket;
+using NeoHub.Services.PanelConfiguration;
 using MudBlazor.Services;
 
 namespace NeoHub
@@ -67,6 +68,7 @@ namespace NeoHub
             // Application services
             builder.Services.AddSingleton<IPanelStateService, PanelStateService>();
             builder.Services.AddSingleton<IPanelCommandService, PanelCommandService>();
+            builder.Services.AddSingleton<IPanelConfigurationService, PanelConfigurationService>();
             builder.Services.AddSingleton<ISessionMonitor, SessionMonitor>();
             builder.Services.AddSingleton<IConnectionSettingsProvider, ConnectionSettingsProvider>();
 

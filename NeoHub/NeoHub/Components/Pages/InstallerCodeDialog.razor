@@ -1,0 +1,40 @@
+@* Inline dialog component for installer code entry *@
+
+<MudDialog>
+    <DialogContent>
+        <MudTextField T="string"
+                      @bind-Value="_code"
+                      Label="Installer Code"
+                      InputType="InputType.Password"
+                      Variant="Variant.Outlined"
+                      AutoFocus="true"
+                      Immediate="true"
+                      HelperText="Enter the panel's installer code to access programming mode"
+                      OnKeyUp="OnKeyUp" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   Disabled="@string.IsNullOrEmpty(_code)"
+                   OnClick="Submit">
+            Connect
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    private string? _code;
+
+    private void Submit() => MudDialog.Close(DialogResult.Ok(_code));
+    private void Cancel() => MudDialog.Cancel();
+
+    private void OnKeyUp(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !string.IsNullOrEmpty(_code))
+            Submit();
+    }
+}

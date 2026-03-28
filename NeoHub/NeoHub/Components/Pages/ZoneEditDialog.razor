@@ -1,0 +1,163 @@
+@using NeoHub.Services.PanelConfiguration
+@using NeoHub.Services.PanelConfiguration.Sections
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="4">
+            @* ── LCD Label Preview + Editing ── *@
+            <MudText Typo="Typo.subtitle2">Zone Label</MudText>
+            <div class="lcd-display">
+                <input type="text" class="lcd-input" maxlength="14"
+                       value="@_line1" @oninput="OnLine1Input"
+                       placeholder="Line 1" />
+                <input type="text" class="lcd-input" maxlength="14"
+                       value="@_line2" @oninput="OnLine2Input"
+                       placeholder="Line 2" />
+            </div>
+
+            @* ── Zone Definition ── *@
+            <MudSelect T="ZoneDefinition"
+                       @bind-Value="_definition"
+                       Label="Zone Definition"
+                       Variant="Variant.Outlined">
+                @foreach (var def in Enum.GetValues<ZoneDefinition>())
+                {
+                    <MudSelectItem T="ZoneDefinition" Value="@def">@FormatEnumName(def.ToString())</MudSelectItem>
+                }
+            </MudSelect>
+
+            @* ── Zone Attributes ── *@
+            <MudText Typo="Typo.subtitle2">Zone Attributes</MudText>
+            <MudStack>
+                @foreach (var flag in IndividualFlags)
+                {
+                    var f = flag;
+                    <MudCheckBox T="bool"
+                                 Value="@_attributes.HasFlag(f)"
+                                 ValueChanged="@(v => ToggleFlag(f, v))"
+                                 Label="@FormatEnumName(f.ToString()).Replace("Is ", "")"
+                                 Dense="true" />
+                }
+            </MudStack>
+
+            @* ── Partition Assignments ── *@
+            <MudText Typo="Typo.subtitle2">Partition Assignments</MudText>
+            <MudStack Row="true" Spacing="2">
+                @for (int p = 0; p < _partitionAssigned.Length; p++)
+                {
+                    var idx = p;
+                    <MudCheckBox T="bool"
+                                 @bind-Value="_partitionAssigned[idx]"
+                                 Label="@($"P{idx + 1}")"
+                                 Dense="true" />
+                }
+            </MudStack>
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Submit" Disabled="true">
+            Save
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+<style>
+    .lcd-display {
+        background-color: #225cf0;
+        border: 3px solid #1a1a2e;
+        border-radius: 6px;
+        padding: 12px 16px;
+        box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.4);
+        min-height: 72px;
+    }
+
+    .lcd-input {
+        display: block;
+        width: 100%;
+        background: transparent;
+        border: none;
+        border-bottom: 1px solid rgba(224, 232, 255, 0.2);
+        outline: none;
+        font-family: 'Courier New', Courier, monospace;
+        font-size: 18px;
+        font-weight: bold;
+        letter-spacing: 3px;
+        line-height: 1.6;
+        color: #e0e8ff;
+        text-shadow: 0 0 6px rgba(180, 200, 255, 0.5);
+        caret-color: #e0e8ff;
+        padding: 2px 0;
+    }
+
+    .lcd-input::placeholder {
+        color: rgba(224, 232, 255, 0.25);
+    }
+
+    .lcd-input:focus {
+        border-bottom-color: rgba(224, 232, 255, 0.5);
+    }
+</style>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter]
+    public int ZoneNumber { get; set; }
+
+    [Parameter]
+    public PanelConfigurationState Config { get; set; } = null!;
+
+    private string _line1 = "";
+    private string _line2 = "";
+    private ZoneDefinition _definition;
+    private ZoneAttributes _attributes;
+    private bool[] _partitionAssigned = [];
+
+    private string CombinedLabel => (_line1.PadRight(14) + _line2.PadRight(14)).TrimEnd();
+
+    private static readonly ZoneAttributes[] IndividualFlags = Enum.GetValues<ZoneAttributes>()
+        .Where(f => f != 0 && (f & (f - 1)) == 0) // only powers of 2
+        .ToArray();
+
+    protected override void OnParametersSet()
+    {
+        var zoneIndex = ZoneNumber - 1;
+        var zoneDefs = Config.ZoneDefinitions.Values;
+        var zoneLabels = Config.ZoneLabels.Values;
+        var zoneAttrs = Config.ZoneAttributes.Values;
+        var assignments = Config.ZoneAssignments.Values;
+        int maxPartitions = Config.Capabilities.MaxPartitions;
+
+        _definition = zoneIndex < zoneDefs.Count ? zoneDefs[zoneIndex] : ZoneDefinition.NullZone;
+        var rawLabel = zoneIndex < zoneLabels.Count ? (zoneLabels[zoneIndex] ?? "") : "";
+        _line1 = rawLabel.Length >= 14 ? rawLabel[..14].TrimEnd() : rawLabel.TrimEnd();
+        _line2 = rawLabel.Length > 14 ? rawLabel[14..Math.Min(28, rawLabel.Length)].TrimEnd() : "";
+        _attributes = zoneIndex < zoneAttrs.Count ? zoneAttrs[zoneIndex] : 0;
+
+        _partitionAssigned = new bool[maxPartitions];
+        for (int p = 0; p < maxPartitions; p++)
+        {
+            if (p < assignments.GetLength(0) && zoneIndex < assignments.GetLength(1))
+                _partitionAssigned[p] = assignments[p, zoneIndex];
+        }
+    }
+
+    private void OnLine1Input(ChangeEventArgs e) => _line1 = Truncate(e.Value?.ToString(), 14);
+    private void OnLine2Input(ChangeEventArgs e) => _line2 = Truncate(e.Value?.ToString(), 14);
+    private static string Truncate(string? s, int max) => string.IsNullOrEmpty(s) ? "" : s.Length > max ? s[..max] : s;
+
+    private void ToggleFlag(ZoneAttributes flag, bool set)
+    {
+        if (set) _attributes |= flag;
+        else _attributes &= ~flag;
+    }
+
+    private static string FormatEnumName(string name) =>
+        System.Text.RegularExpressions.Regex.Replace(name, @"(\p{Ll})(\p{Lu})", "$1 $2")
+            .Replace("24 Hour", "24-Hour");
+
+    private void Submit() => MudDialog.Close(DialogResult.Ok(true));
+    private void Cancel() => MudDialog.Cancel();
+}
