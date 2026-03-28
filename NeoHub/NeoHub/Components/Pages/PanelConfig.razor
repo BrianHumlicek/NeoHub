@@ -86,6 +86,7 @@
                         <thead>
                             <tr>
                                 <th style="width:50px;">#</th>
+                                <th style="min-width:80px;">Status</th>
                                 <th style="min-width:200px;">Label</th>
                                 <th style="min-width:150px;">Definition</th>
                                 <th style="min-width:180px;">Attributes</th>
@@ -108,10 +109,12 @@
                                 var label = z < zoneLabels.Count ? zoneLabels[z] : null;
                                 var attrs = z < zoneAttrs.Count ? zoneAttrs[z] : (ZoneAttributes)0;
                                 var isNull = def == ZoneDefinition.NullZone;
+                                var zoneState = _session?.Zones.GetValueOrDefault((byte)zoneNum);
 
                                 <tr style="@(isNull ? "opacity: 0.4;" : "") cursor: pointer;"
                                     @onclick="@(() => EditZoneAsync(zoneNum))">
                                     <td><strong>@zoneNum</strong></td>
+                                    <td>@GetZoneStatusChip(zoneState)</td>
                                     <td style="font-family: 'Courier New', monospace; font-size: 0.85em;">
                                         @if (!string.IsNullOrEmpty(label))
                                         {
@@ -121,16 +124,16 @@
                                     <td>@(isNull ? "—" : FormatEnumName(def.ToString()))</td>
                                     <td style="font-size: 0.8em;">@FormatAttributes(attrs)</td>
                                     <td>
-                                        <div style="display: flex; gap: 4px; align-items: center;">
+                                        <div style="display: flex; gap: 3px; align-items: center;">
                                             @for (int p = 0; p < maxPartitions; p++)
                                             {
                                                 var pIdx = p;
                                                 var zIdx = z;
                                                 var assigned = pIdx < assignments.GetLength(0) && zIdx < assignments.GetLength(1) && assignments[pIdx, zIdx];
-                                                var bg = assigned ? "#4caf50" : "#9e9e9e";
-                                                var op = assigned ? "1" : "0.2";
-                                                <div style="width:12px; height:12px; border-radius:50%; background:@bg; opacity:@op;"
-                                                     title="@($"P{pIdx + 1}: {(assigned ? "Assigned" : "Not assigned")}")"></div>
+                                                <div style="width:18px; height:18px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+                                                            background:@(assigned ? "#4caf50" : "#9e9e9e"); opacity:@(assigned ? "1" : "0.15");
+                                                            font-size:10px; font-weight:bold; color:#fff; line-height:1;"
+                                                     title="@($"P{pIdx + 1}: {(assigned ? "Assigned" : "Not assigned")}")">@(pIdx + 1)</div>
                                             }
                                         </div>
                                     </td>
@@ -148,8 +151,9 @@
                         <thead>
                             <tr>
                                 <th style="width:50px;">#</th>
-                                <th style="min-width:200px;">Label</th>
                                 <th style="min-width:100px;">Status</th>
+                                <th style="min-width:200px;">Label</th>
+                                <th style="min-width:100px;">Config</th>
                                 <th style="min-width:100px;">Zones</th>
                             </tr>
                         </thead>
@@ -166,9 +170,11 @@
                                 var enabled = partEnables[p];
                                 var assignedZones = partAssignments.FirstOrDefault(a => a.Partition == partNum).Zones;
                                 var zoneCount = assignedZones?.Length ?? 0;
+                                var partState = _session?.Partitions.GetValueOrDefault((byte)partNum);
 
                                 <tr style="cursor: pointer;" @onclick="@(() => EditPartitionAsync(partNum))">
                                     <td><strong>@partNum</strong></td>
+                                    <td>@GetPartitionStatusChip(partState, enabled)</td>
                                     <td style="font-family: 'Courier New', monospace; font-size: 0.85em;">
                                         @if (!string.IsNullOrEmpty(label))
                                         {
@@ -202,6 +208,7 @@
 @code {
     private List<string> _activeSessions = new();
     private string? _sessionId;
+    private SessionState? _session;
     private PanelConfigurationState? _config;
     private bool _isReading;
     private bool _disposed;
@@ -227,8 +234,8 @@
                 return;
             }
 
-            var session = PanelState.GetSession(_sessionId);
-            _config = session?.Configuration;
+            _session = PanelState.GetSession(_sessionId);
+            _config = _session?.Configuration;
 
             if (_config is not null)
             {
@@ -265,8 +272,8 @@
             if (_disposed) return;
             try
             {
-                var session = _sessionId is not null ? PanelState.GetSession(_sessionId) : null;
-                _config = session?.Configuration;
+                _session = _sessionId is not null ? PanelState.GetSession(_sessionId) : null;
+                _config = _session?.Configuration;
                 StateHasChanged();
             }
             catch (ObjectDisposedException) { }
@@ -298,7 +305,8 @@
             var result = await ConfigService.ReadAllAsync(_sessionId, code!, CancellationToken.None);
             if (result.Success)
             {
-                _config = PanelState.GetSession(_sessionId)?.Configuration;
+                _session = PanelState.GetSession(_sessionId);
+                _config = _session?.Configuration;
                 Snackbar.Add("Configuration loaded", Severity.Success);
             }
             else
@@ -330,18 +338,24 @@
     {
         if (_config is null) return;
 
+        var zoneState = _session?.Zones.GetValueOrDefault((byte)zoneNumber);
+        var statusText = zoneState is not null ? $" — {GetZoneStatusText(zoneState)}" : "";
+
         var parameters = new DialogParameters<ZoneEditDialog>
         {
             { x => x.ZoneNumber, zoneNumber },
             { x => x.Config, _config }
         };
         var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true };
-        await DialogService.ShowAsync<ZoneEditDialog>($"Zone {zoneNumber}", parameters, options);
+        await DialogService.ShowAsync<ZoneEditDialog>($"Zone {zoneNumber}{statusText}", parameters, options);
     }
 
     private async Task EditPartitionAsync(int partitionNumber)
     {
         if (_config is null) return;
+
+        var partState = _session?.Partitions.GetValueOrDefault((byte)partitionNumber);
+        var statusText = partState is not null ? $" — {FormatEnumName(partState.EffectiveStatus.ToString())}" : "";
 
         var parameters = new DialogParameters<PartitionEditDialog>
         {
@@ -349,7 +363,7 @@
             { x => x.Config, _config }
         };
         var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true };
-        await DialogService.ShowAsync<PartitionEditDialog>($"Partition {partitionNumber}", parameters, options);
+        await DialogService.ShowAsync<PartitionEditDialog>($"Partition {partitionNumber}{statusText}", parameters, options);
     }
 
     private static string FormatLabelLine1(string label) =>
@@ -361,6 +375,50 @@
     private static string FormatEnumName(string name) =>
         System.Text.RegularExpressions.Regex.Replace(name, @"(\p{Ll})(\p{Lu})", "$1 $2")
             .Replace("24 Hour", "24-Hour");
+
+    private static string GetZoneStatusText(ZoneState? zone)
+    {
+        if (zone is null) return "Unknown";
+        if (zone.IsTampered) return "Tampered";
+        if (zone.IsFaulted) return "Faulted";
+        if (zone.IsBypassed) return "Bypassed";
+        return zone.IsOpen ? "Open" : "Closed";
+    }
+
+    private static RenderFragment GetZoneStatusChip(ZoneState? zone) => __builder =>
+    {
+        if (zone is null) return;
+        var text = GetZoneStatusText(zone);
+        var color = zone switch
+        {
+            { IsTampered: true } => Color.Error,
+            { IsFaulted: true } => Color.Error,
+            { IsBypassed: true } => Color.Warning,
+            { IsOpen: true } => Color.Info,
+            _ => Color.Success
+        };
+        <MudChip T="string" Size="Size.Small" Color="@color"
+                 Variant="@(zone.IsOpen || zone.IsFaulted || zone.IsTampered ? Variant.Filled : Variant.Outlined)">@text</MudChip>;
+    };
+
+    private static RenderFragment GetPartitionStatusChip(PartitionState? part, PartitionEnable enabled) => __builder =>
+    {
+        if (enabled != PartitionEnable.Enabled) { <MudChip T="string" Size="Size.Small" Color="Color.Default">Disabled</MudChip>; return; }
+        if (part is null) { <MudChip T="string" Size="Size.Small" Color="Color.Default">Unknown</MudChip>; return; }
+        var status = part.EffectiveStatus;
+        var color = status switch
+        {
+            PartitionStatus.Disarmed => Color.Success,
+            PartitionStatus.ArmedAway => Color.Error,
+            PartitionStatus.ArmedHome => Color.Warning,
+            PartitionStatus.ArmedNight => Color.Dark,
+            PartitionStatus.Arming => Color.Warning,
+            PartitionStatus.Triggered => Color.Error,
+            PartitionStatus.Pending => Color.Warning,
+            _ => Color.Default
+        };
+        <MudChip T="string" Size="Size.Small" Color="@color">@FormatEnumName(status.ToString())</MudChip>;
+    };
 
     private static string FormatAttributes(ZoneAttributes attrs)
     {
