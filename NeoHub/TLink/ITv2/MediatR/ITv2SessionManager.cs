@@ -14,6 +14,7 @@ namespace DSC.TLink.ITv2.MediatR
         internal IITv2Session? GetSession(string sessionId);
         IEnumerable<string> GetActiveSessions();
         Task DisconnectSessionAsync(string sessionId);
+        Task DisconnectAllAsync();
     }
 
     internal class ITv2SessionManager : IITv2SessionManager
@@ -65,6 +66,16 @@ namespace DSC.TLink.ITv2.MediatR
                 await session.DisposeAsync();
                 PublishLifecycleNotification(new SessionDisconnectedNotification(sessionId));
             }
+        }
+
+        public async Task DisconnectAllAsync()
+        {
+            var sessionIds = _sessions.Keys.ToList();
+            if (sessionIds.Count == 0)
+                return;
+
+            _logger.LogInformation("Disconnecting all {Count} active session(s)", sessionIds.Count);
+            await Task.WhenAll(sessionIds.Select(DisconnectSessionAsync));
         }
 
         public IEnumerable<string> GetActiveSessions()
