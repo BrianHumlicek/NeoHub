@@ -44,6 +44,7 @@ namespace DSC.TLink
 			builder.Services.AddSingleton<IITv2SessionManager, ITv2SessionManager>();
 			builder.Services.AddSingleton<SessionMediator>();
 			builder.Services.AddSingleton<ITv2ConnectionHandler>();
+			builder.Services.AddHostedService<SessionShutdownService>();
 
 			// Configure Kestrel with ITv2 connection handler
 			builder.WebHost.ConfigureKestrel((context, options) =>
