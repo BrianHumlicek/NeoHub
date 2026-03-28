@@ -46,6 +46,15 @@ namespace NeoHub.Services.Handlers
             var sessionId = notification.SessionId;
             _logger.LogInformation("Starting panel configuration pull");
 
+            // Ensure the session exists — it may not have been created yet
+            // since the connected notification fires early in the lifecycle.
+            _panelState.UpdateSession(sessionId, _ => { });
+            var session = _panelState.GetSession(sessionId)!;
+
+            // Acquire the config lock for the entire initialization sequence.
+            // This prevents user-initiated operations from interleaving.
+            await session.ConfigLock.WaitAsync(cancellationToken);
+
             try
             {
                 // ── 1. Capabilities ──
@@ -64,10 +73,10 @@ namespace NeoHub.Services.Handlers
                     "Panel capabilities: {MaxZones} zones, {MaxPartitions} partitions",
                     capabilities.MaxZones, capabilities.MaxPartitions);
 
-                _panelState.UpdateSession(sessionId, session =>
+                _panelState.UpdateSession(sessionId, s =>
                 {
-                    session.MaxZones = capabilities.MaxZones;
-                    session.MaxPartitions = capabilities.MaxPartitions;
+                    s.MaxZones = capabilities.MaxZones;
+                    s.MaxPartitions = capabilities.MaxPartitions;
                 });
 
                 var connectionSettings = _connectionSettings.CurrentValue.Connections
@@ -86,7 +95,15 @@ namespace NeoHub.Services.Handlers
                 if (!string.IsNullOrEmpty(installerCode))
                 {
                     _logger.LogInformation("Installer code configured, reading panel configuration sections");
-                    var result = await _configService.ReadAllAsync(sessionId, installerCode, cancellationToken);
+                    var result = await _configService.ExecuteInConfigModeAsync(
+                        sessionId, installerCode, readWrite: false,
+                        async () =>
+                        {
+                            await _configService.ReadSectionsAsync(
+                                sessionId, CreateSendDelegate(sessionId), cancellationToken);
+                            return new SectionResult(true);
+                        }, cancellationToken);
+
                     if (result.Success)
                         ApplyConfigurationToSessionState(sessionId, effectiveZones, capabilities.MaxPartitions);
                     else
@@ -94,8 +111,8 @@ namespace NeoHub.Services.Handlers
                 }
 
                 // Fall back to explicit label pull if no config was read
-                var session = _panelState.GetSession(sessionId);
-                if (session?.Configuration is null)
+                session = _panelState.GetSession(sessionId)!;
+                if (session.Configuration is null)
                 {
                     await PullZoneLabelsAsync(sessionId, effectiveZones, cancellationToken);
                     await PullPartitionLabelsAsync(sessionId, capabilities.MaxPartitions, cancellationToken);
@@ -116,7 +133,23 @@ namespace NeoHub.Services.Handlers
             {
                 _logger.LogError(ex, "Error during panel configuration pull");
             }
+            finally
+            {
+                _panelState.UpdateSession(sessionId, s => s.IsInitialized = true);
+                session.ConfigLock.Release();
+            }
         }
+
+        private SendSectionRead CreateSendDelegate(string sessionId) =>
+            async (request, token) =>
+            {
+                var response = await _mediator.Send(new SessionCommand
+                {
+                    SessionID = sessionId,
+                    MessageData = request
+                }, token);
+                return response.Success ? response.MessageData as SectionReadResponse : null;
+            };
 
         /// <summary>
         /// Populates session-level PartitionState and ZoneState from the installer configuration.

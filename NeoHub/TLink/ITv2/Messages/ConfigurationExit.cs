@@ -31,6 +31,6 @@ namespace DSC.TLink.ITv2.Messages
     public record ConfigurationExit : CommandMessageBase
     {
         [CompactInteger]
-        public int Partition { get; init; }
+        public int Partition { get; init; } = 1;
     }
 }

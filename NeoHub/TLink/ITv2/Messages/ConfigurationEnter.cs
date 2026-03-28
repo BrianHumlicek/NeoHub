@@ -36,7 +36,7 @@ namespace DSC.TLink.ITv2.Messages
     public record ConfigurationEnter : CommandMessageBase
     {
         [CompactInteger]
-        public int Partition { get; init; }
+        public int Partition { get; init; } = 1;
 
         public ProgrammingMode ProgrammingMode { get; init; }
 

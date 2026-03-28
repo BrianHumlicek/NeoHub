@@ -49,6 +49,14 @@ public class ZoneDefinitionSection
         if (response?.SectionData is { Length: >= 1 })
             _values[zone - 1] = (ZoneDefinition)response.SectionData[0];
     }
+
+    public async Task<SectionResult> WriteAsync(SendSectionWrite send, int zone, ZoneDefinition definition, CancellationToken ct)
+    {
+        var result = await send(new SectionWrite { SectionAddress = [1, (ushort)zone], SectionData = [(byte)definition] }, ct);
+        if (result.Success)
+            _values[zone - 1] = definition;
+        return result;
+    }
 }
 
 public enum ZoneDefinition : byte

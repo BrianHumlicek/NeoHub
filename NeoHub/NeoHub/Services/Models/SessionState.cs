@@ -27,6 +27,18 @@ namespace NeoHub.Services.Models
         public bool IsInProgrammingMode { get; set; }
 
         /// <summary>
+        /// Whether the initial configuration pull (capabilities, labels, status)
+        /// has completed. User-initiated operations should wait for this.
+        /// </summary>
+        public bool IsInitialized { get; set; }
+
+        /// <summary>
+        /// Serializes panel configuration operations (reads and writes).
+        /// Prevents the initial handler pull and user-initiated operations from interleaving.
+        /// </summary>
+        public SemaphoreSlim ConfigLock { get; } = new(1, 1);
+
+        /// <summary>
         /// When this session was established.
         /// </summary>
         public DateTime ConnectedAt { get; set; } = DateTime.UtcNow;

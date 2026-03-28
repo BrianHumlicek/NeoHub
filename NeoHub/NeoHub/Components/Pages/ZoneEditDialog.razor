@@ -1,5 +1,7 @@
 @using NeoHub.Services.PanelConfiguration
 @using NeoHub.Services.PanelConfiguration.Sections
+@inject IPanelConfigurationService ConfigService
+@inject ISnackbar Snackbar
 
 <MudDialog>
     <DialogContent>
@@ -56,7 +58,8 @@
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel">Cancel</MudButton>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Submit" Disabled="true">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync" Disabled="_saving">
+            @if (_saving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
             Save
         </MudButton>
     </DialogActions>
@@ -109,16 +112,29 @@
     [Parameter]
     public PanelConfigurationState Config { get; set; } = null!;
 
+    [Parameter]
+    public string SessionId { get; set; } = null!;
+
+    [Parameter]
+    public string InstallerCode { get; set; } = null!;
+
     private string _line1 = "";
     private string _line2 = "";
     private ZoneDefinition _definition;
     private ZoneAttributes _attributes;
     private bool[] _partitionAssigned = [];
+    private bool _saving;
+
+    // Original values for dirty checking
+    private string _origLabel = "";
+    private ZoneDefinition _origDefinition;
+    private ZoneAttributes _origAttributes;
+    private bool[] _origPartitionAssigned = [];
 
     private string CombinedLabel => (_line1.PadRight(14) + _line2.PadRight(14)).TrimEnd();
 
     private static readonly ZoneAttributes[] IndividualFlags = Enum.GetValues<ZoneAttributes>()
-        .Where(f => f != 0 && (f & (f - 1)) == 0) // only powers of 2
+        .Where(f => f != 0 && (f & (f - 1)) == 0)
         .ToArray();
 
     protected override void OnParametersSet()
@@ -142,6 +158,12 @@
             if (p < assignments.GetLength(0) && zoneIndex < assignments.GetLength(1))
                 _partitionAssigned[p] = assignments[p, zoneIndex];
         }
+
+        // Snapshot for dirty checking
+        _origLabel = CombinedLabel;
+        _origDefinition = _definition;
+        _origAttributes = _attributes;
+        _origPartitionAssigned = _partitionAssigned.ToArray();
     }
 
     private void OnLine1Input(ChangeEventArgs e) => _line1 = Truncate(e.Value?.ToString(), 14);
@@ -158,6 +180,94 @@
         System.Text.RegularExpressions.Regex.Replace(name, @"(\p{Ll})(\p{Lu})", "$1 $2")
             .Replace("24 Hour", "24-Hour");
 
-    private void Submit() => MudDialog.Close(DialogResult.Ok(true));
+    private async Task SaveAsync()
+    {
+        _saving = true;
+        StateHasChanged();
+
+        try
+        {
+            var result = await ConfigService.ExecuteInConfigModeAsync(
+                SessionId, InstallerCode, readWrite: true, async () =>
+                {
+                    var errors = new List<string>();
+                    var send = ConfigService.CreateWriteDelegate(SessionId);
+
+                    if (_definition != _origDefinition)
+                    {
+                        var r = await Config.ZoneDefinitions.WriteAsync(send, ZoneNumber, _definition, CancellationToken.None);
+                        if (!r.Success) errors.Add($"Definition: {r.ErrorMessage}");
+                    }
+
+                    if (_attributes != _origAttributes)
+                    {
+                        var r = await Config.ZoneAttributes.WriteAsync(send, ZoneNumber, _attributes, CancellationToken.None);
+                        if (!r.Success) errors.Add($"Attributes: {r.ErrorMessage}");
+                    }
+
+                    if (CombinedLabel != _origLabel)
+                    {
+                        var r = await Config.ZoneLabels.WriteAsync(send, ZoneNumber, CombinedLabel, CancellationToken.None);
+                        if (!r.Success) errors.Add($"Label: {r.ErrorMessage}");
+                    }
+
+                    if (!_partitionAssigned.SequenceEqual(_origPartitionAssigned))
+                    {
+                        for (int p = 0; p < _partitionAssigned.Length; p++)
+                        {
+                            if (_partitionAssigned[p] != _origPartitionAssigned[p])
+                            {
+                                var assignments = Config.ZoneAssignments.Values;
+                                int maxZones = Config.Capabilities.MaxZones;
+                                var zones = new bool[maxZones];
+                                for (int z = 0; z < maxZones; z++)
+                                {
+                                    if (p < assignments.GetLength(0) && z < assignments.GetLength(1))
+                                        zones[z] = assignments[p, z];
+                                }
+                                zones[ZoneNumber - 1] = _partitionAssigned[p];
+
+                                var r = await Config.ZoneAssignments.WriteAsync(send, p + 1, zones, CancellationToken.None);
+                                if (!r.Success) errors.Add($"Partition {p + 1} assignment: {r.ErrorMessage}");
+                            }
+                        }
+                    }
+
+                    return errors.Count > 0
+                        ? new SectionResult(false, string.Join("; ", errors))
+                        : new SectionResult(true);
+                }, CancellationToken.None);
+
+            if (result.Success)
+            {
+                Snackbar.Add($"Zone {ZoneNumber} saved", Severity.Success);
+                MudDialog.Close(DialogResult.Ok(true));
+            }
+            else
+            {
+                Snackbar.Add($"Save failed: {result.ErrorMessage}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+            StateHasChanged();
+        }
+    }
+
+    private SendSectionWrite CreateWriteDelegate() =>
+        async (request, token) =>
+        {
+            var response = await ConfigService.ExecuteInConfigModeAsync(
+                SessionId, InstallerCode, readWrite: true,
+                () => Task.FromResult(new SectionResult(true)),
+                token);
+            return response;
+        };
+
     private void Cancel() => MudDialog.Cancel();
 }

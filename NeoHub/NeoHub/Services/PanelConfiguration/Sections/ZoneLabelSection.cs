@@ -59,4 +59,13 @@ public class ZoneLabelSection
         if (response?.SectionData is { Length: >= 2 })
             _values[zone - 1] = Encoding.BigEndianUnicode.GetString(response.SectionData).TrimEnd();
     }
+    public async Task<SectionResult> WriteAsync(SendSectionWrite send, int zone, string label, CancellationToken ct)
+    {
+        string paddedLabel = label.PadRight(28)[..28];
+        byte[] data = Encoding.BigEndianUnicode.GetBytes(paddedLabel);
+        var result = await send(new SectionWrite { SectionAddress = [0, 1, (ushort)zone], SectionData = data }, ct);
+        if (result.Success)
+            _values[zone - 1] = label.TrimEnd();
+        return result;
+    }
 }

@@ -1,5 +1,7 @@
 @using NeoHub.Services.PanelConfiguration
 @using NeoHub.Services.PanelConfiguration.Sections
+@inject IPanelConfigurationService ConfigService
+@inject ISnackbar Snackbar
 
 <MudDialog>
     <DialogContent>
@@ -47,7 +49,8 @@
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel">Cancel</MudButton>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Submit" Disabled="true">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync" Disabled="_saving">
+            @if (_saving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
             Save
         </MudButton>
     </DialogActions>
@@ -86,9 +89,21 @@
     [Parameter]
     public PanelConfigurationState Config { get; set; } = null!;
 
+    [Parameter]
+    public string SessionId { get; set; } = null!;
+
+    [Parameter]
+    public string InstallerCode { get; set; } = null!;
+
     private string _label = "";
     private PartitionEnable _enabled;
     private bool[] _assignedZones = [];
+    private bool _saving;
+
+    // Original values for dirty checking
+    private string _origLabel = "";
+    private PartitionEnable _origEnabled;
+    private bool[] _origAssignedZones = [];
 
     private string Line1 => (_label.Length >= 14 ? _label[..14] : _label.PadRight(14)).Replace(' ', '\u00A0');
     private string Line2 => (_label.Length > 14 ? _label[14..Math.Min(28, _label.Length)] : "").PadRight(14).Replace(' ', '\u00A0');
@@ -110,8 +125,69 @@
             if (partIndex < assignments.GetLength(0) && z < assignments.GetLength(1))
                 _assignedZones[z] = assignments[partIndex, z];
         }
+
+        // Snapshot for dirty checking
+        _origLabel = _label;
+        _origEnabled = _enabled;
+        _origAssignedZones = _assignedZones.ToArray();
     }
 
-    private void Submit() => MudDialog.Close(DialogResult.Ok(true));
+    private async Task SaveAsync()
+    {
+        _saving = true;
+        StateHasChanged();
+
+        try
+        {
+            var result = await ConfigService.ExecuteInConfigModeAsync(
+                SessionId, InstallerCode, readWrite: true, async () =>
+                {
+                    var errors = new List<string>();
+                    var send = ConfigService.CreateWriteDelegate(SessionId);
+
+                    if (_label != _origLabel)
+                    {
+                        var r = await Config.PartitionLabels.WriteAsync(send, PartitionNumber, _label, CancellationToken.None);
+                        if (!r.Success) errors.Add($"Label: {r.ErrorMessage}");
+                    }
+
+                    if (_enabled != _origEnabled)
+                    {
+                        var r = await Config.PartitionEnables.WriteAsync(send, PartitionNumber, _enabled, CancellationToken.None);
+                        if (!r.Success) errors.Add($"Enable: {r.ErrorMessage}");
+                    }
+
+                    if (!_assignedZones.SequenceEqual(_origAssignedZones))
+                    {
+                        var r = await Config.ZoneAssignments.WriteAsync(send, PartitionNumber, _assignedZones, CancellationToken.None);
+                        if (!r.Success) errors.Add($"Zone assignments: {r.ErrorMessage}");
+                    }
+
+                    return errors.Count > 0
+                        ? new SectionResult(false, string.Join("; ", errors))
+                        : new SectionResult(true);
+                }, CancellationToken.None);
+
+            if (result.Success)
+            {
+                Snackbar.Add($"Partition {PartitionNumber} saved", Severity.Success);
+                MudDialog.Close(DialogResult.Ok(true));
+            }
+            else
+            {
+                Snackbar.Add($"Save failed: {result.ErrorMessage}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+            StateHasChanged();
+        }
+    }
+
     private void Cancel() => MudDialog.Cancel();
 }

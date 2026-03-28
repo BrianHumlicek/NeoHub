@@ -48,6 +48,14 @@ public class PartitionEnableSection
         if (response?.SectionData is { Length: >= 1 })
             _values[partition - 1] = (PartitionEnable)response.SectionData[0];
     }
+
+    public async Task<SectionResult> WriteAsync(SendSectionWrite send, int partition, PartitionEnable enabled, CancellationToken ct)
+    {
+        var result = await send(new SectionWrite { SectionAddress = [200, (ushort)partition], SectionData = [(byte)enabled] }, ct);
+        if (result.Success)
+            _values[partition - 1] = enabled;
+        return result;
+    }
 }
 
 public enum PartitionEnable : byte

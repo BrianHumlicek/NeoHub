@@ -208,6 +208,7 @@
 @code {
     private List<string> _activeSessions = new();
     private string? _sessionId;
+    private string? _installerCode;
     private SessionState? _session;
     private PanelConfigurationState? _config;
     private bool _isReading;
@@ -239,6 +240,8 @@
 
             if (_config is not null)
             {
+                // Config loaded at startup — capture the installer code for writes
+                _installerCode = AppSettings.CurrentValue.DefaultInstallerCode;
                 StateHasChanged();
                 return;
             }
@@ -287,7 +290,7 @@
         var session = PanelState.GetSession(_sessionId);
         var code = AppSettings.CurrentValue.DefaultInstallerCode;
 
-        if (string.IsNullOrEmpty(code) && session?.IsInProgrammingMode != true)
+        if (string.IsNullOrEmpty(code))
         {
             code = await PromptForInstallerCodeAsync();
             if (string.IsNullOrEmpty(code))
@@ -297,6 +300,7 @@
             }
         }
 
+        _installerCode = code;
         _isReading = true;
         StateHasChanged();
 
@@ -336,7 +340,7 @@
 
     private async Task EditZoneAsync(int zoneNumber)
     {
-        if (_config is null) return;
+        if (_config is null || _sessionId is null || _installerCode is null) return;
 
         var zoneState = _session?.Zones.GetValueOrDefault((byte)zoneNumber);
         var statusText = zoneState is not null ? $" — {GetZoneStatusText(zoneState)}" : "";
@@ -344,15 +348,24 @@
         var parameters = new DialogParameters<ZoneEditDialog>
         {
             { x => x.ZoneNumber, zoneNumber },
-            { x => x.Config, _config }
+            { x => x.Config, _config },
+            { x => x.SessionId, _sessionId },
+            { x => x.InstallerCode, _installerCode }
         };
         var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true };
-        await DialogService.ShowAsync<ZoneEditDialog>($"Zone {zoneNumber}{statusText}", parameters, options);
+        var dialog = await DialogService.ShowAsync<ZoneEditDialog>($"Zone {zoneNumber}{statusText}", parameters, options);
+        var result = await dialog.Result;
+        if (result?.Canceled == false)
+        {
+            _session = PanelState.GetSession(_sessionId);
+            _config = _session?.Configuration;
+            StateHasChanged();
+        }
     }
 
     private async Task EditPartitionAsync(int partitionNumber)
     {
-        if (_config is null) return;
+        if (_config is null || _sessionId is null || _installerCode is null) return;
 
         var partState = _session?.Partitions.GetValueOrDefault((byte)partitionNumber);
         var statusText = partState is not null ? $" — {FormatEnumName(partState.EffectiveStatus.ToString())}" : "";
@@ -360,10 +373,19 @@
         var parameters = new DialogParameters<PartitionEditDialog>
         {
             { x => x.PartitionNumber, partitionNumber },
-            { x => x.Config, _config }
+            { x => x.Config, _config },
+            { x => x.SessionId, _sessionId },
+            { x => x.InstallerCode, _installerCode }
         };
         var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true };
-        await DialogService.ShowAsync<PartitionEditDialog>($"Partition {partitionNumber}{statusText}", parameters, options);
+        var dialog = await DialogService.ShowAsync<PartitionEditDialog>($"Partition {partitionNumber}{statusText}", parameters, options);
+        var result = await dialog.Result;
+        if (result?.Canceled == false)
+        {
+            _session = PanelState.GetSession(_sessionId);
+            _config = _session?.Configuration;
+            StateHasChanged();
+        }
     }
 
     private static string FormatLabelLine1(string label) =>

@@ -113,4 +113,65 @@ public class ZoneAssignmentSection
             }
         }
     }
+
+    /// <summary>
+    /// Writes the zone assignment bitmap for a single partition.
+    /// Each byte is written individually to match the read pattern.
+    /// </summary>
+    public async Task<SectionResult> WriteAsync(SendSectionWrite send, int partition, bool[] zones, CancellationToken ct)
+    {
+        int maxZones = _capabilities.MaxZones;
+        int bytesPerPartition = (maxZones + 7) / 8;
+
+        for (int byteIdx = 0; byteIdx < bytesPerPartition; byteIdx++)
+        {
+            byte bitmap = 0;
+            for (int bit = 0; bit < 8; bit++)
+            {
+                int zoneIndex = byteIdx * 8 + bit;
+                if (zoneIndex < zones.Length && zones[zoneIndex])
+                    bitmap |= (byte)(0x80 >> bit);
+            }
+
+            var result = await send(
+                new SectionWrite
+                {
+                    SectionAddress = [(ushort)(200 + partition), (ushort)(1 + byteIdx)],
+                    SectionData = [bitmap]
+                }, ct);
+
+            if (!result.Success)
+                return result;
+        }
+
+        // Update local state on success
+        int partIndex = partition - 1;
+        for (int z = 0; z < Math.Min(zones.Length, maxZones); z++)
+        {
+            if (partIndex < _assignments.GetLength(0) && z < _assignments.GetLength(1))
+                _assignments[partIndex, z] = zones[z];
+        }
+
+        return new(true);
+    }
+
+    private byte[] EncodeBitmap(int partitionIndex, int maxZones)
+    {
+        int bytesPerPartition = (maxZones + 7) / 8;
+        var data = new byte[bytesPerPartition];
+
+        for (int byteIndex = 0; byteIndex < bytesPerPartition; byteIndex++)
+        {
+            byte bitmap = 0;
+            for (int bit = 0; bit < 8; bit++)
+            {
+                int zoneIndex = byteIndex * 8 + bit;
+                if (zoneIndex < maxZones && _assignments[partitionIndex, zoneIndex])
+                    bitmap |= (byte)(0x80 >> bit);
+            }
+            data[byteIndex] = bitmap;
+        }
+
+        return data;
+    }
 }

@@ -50,6 +50,15 @@ public class ZoneAttributeSection
         if (response?.SectionData is { Length: >= 2 })
             _values[zone - 1] = (ZoneAttributes)(ushort)(response.SectionData[0] << 8 | response.SectionData[1]);
     }
+
+    public async Task<SectionResult> WriteAsync(SendSectionWrite send, int zone, ZoneAttributes attributes, CancellationToken ct)
+    {
+        var value = (ushort)attributes;
+        var result = await send(new SectionWrite { SectionAddress = [2, (ushort)zone], SectionData = [(byte)(value >> 8), (byte)(value & 0xFF)] }, ct);
+        if (result.Success)
+            _values[zone - 1] = attributes;
+        return result;
+    }
 }
 
 [Flags]

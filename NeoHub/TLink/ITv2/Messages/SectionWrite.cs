@@ -2,8 +2,8 @@
 
 namespace DSC.TLink.ITv2.Messages;
 
-[ITv2Command(Enumerations.ITv2Command.Response_Installers_Section_Read)]
-public record SectionReadResponse : IMessageData
+[ITv2Command(Enumerations.ITv2Command.Configuration_Installers_Section_Write)]
+public record SectionWrite :  CommandMessageBase
 {
     private readonly SectionMessageSerializer _sectionSerializer = new();
     public byte[] MessageBytes

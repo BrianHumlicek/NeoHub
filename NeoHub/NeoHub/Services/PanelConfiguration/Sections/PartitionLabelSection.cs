@@ -56,4 +56,14 @@ public class PartitionLabelSection
         if (response?.SectionData is { Length: >= 2 })
             _values[partition - 1] = Encoding.BigEndianUnicode.GetString(response.SectionData).TrimEnd();
     }
+
+    public async Task<SectionResult> WriteAsync(SendSectionWrite send, int partition, string label, CancellationToken ct)
+    {
+        string paddedLabel = label.PadRight(28)[..28];
+        byte[] data = Encoding.BigEndianUnicode.GetBytes(paddedLabel);
+        var result = await send(new SectionWrite { SectionAddress = [0, (ushort)(100 + partition)], SectionData = data }, ct);
+        if (result.Success)
+            _values[partition - 1] = label.TrimEnd();
+        return result;
+    }
 }
