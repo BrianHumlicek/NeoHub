@@ -320,7 +320,11 @@
 		InvokeAsync(() =>
 		{
 			if (_disposed) return;
-			try { StateHasChanged(); }
+			try
+			{
+				RefreshSessions();
+				StateHasChanged();
+			}
 			catch (ObjectDisposedException) { }
 		});
 	}
