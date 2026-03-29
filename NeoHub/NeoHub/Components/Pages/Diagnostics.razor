@@ -168,25 +168,17 @@
         _renderTimer = new Timer(OnRenderTimerElapsed, null, Timeout.Infinite, Timeout.Infinite);
     }
 
-    protected override async Task OnAfterRenderAsync(bool firstRender)
+    protected override Task OnAfterRenderAsync(bool firstRender)
     {
-        if (_cts.IsCancellationRequested) return;
+        if (_cts.IsCancellationRequested) return Task.CompletedTask;
 
+        // Fire-and-forget: awaiting JS interop here releases the sync context,
+        // which allows queued InvokeAsync callbacks (from OnLogReceived) to run
+        // and call StateHasChanged() mid-render — causing a re-entrant render
+        // that crashes the diff builder with NullReferenceException.
         if (autoScroll)
-        {
-            try
-            {
-                await JS.InvokeVoidAsync("scrollToBottom", "log-container");
-            }
-            catch (ObjectDisposedException)
-            {
-                // Component/renderer disposed during teardown
-            }
-            catch (InvalidOperationException)
-            {
-                // Renderer is no longer available
-            }
-        }
+            _ = JS.InvokeVoidAsync("scrollToBottom", "log-container");
+        return Task.CompletedTask;
     }
 
     private void OnLogReceived(DiagnosticsLogEntry entry)

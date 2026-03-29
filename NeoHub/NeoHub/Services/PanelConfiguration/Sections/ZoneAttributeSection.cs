@@ -21,7 +21,6 @@ public class ZoneAttributeSection
             var values = _values;
             return values
                 .Select((v, i) => (Number: i + 1, Value: v))
-                .Where(e => e.Value != 0)
                 .ToList();
         }
     }
@@ -40,7 +39,7 @@ public class ZoneAttributeSection
         {
             int elementCount = Math.Min(response.SectionData.Length / 2, _values.Length);
             for (int i = 0; i < elementCount; i++)
-                _values[i] = (ZoneAttributes)(ushort)(response.SectionData[i * 2] << 8 | response.SectionData[i * 2 + 1]);
+                _values[i] = new ZoneAttributes((ZoneFunctionalAttributes)response.SectionData[i * 2], (ZonePhysicalAttributes)response.SectionData[i * 2 + 1]);
         }
     }
 
@@ -48,34 +47,39 @@ public class ZoneAttributeSection
     {
         var response = await send(new SectionRead { SectionAddress = [2, (ushort)zone] }, ct);
         if (response?.SectionData is { Length: >= 2 })
-            _values[zone - 1] = (ZoneAttributes)(ushort)(response.SectionData[0] << 8 | response.SectionData[1]);
+            _values[zone - 1] = new ZoneAttributes((ZoneFunctionalAttributes)response.SectionData[0], (ZonePhysicalAttributes)response.SectionData[1]);
     }
 
     public async Task<SectionResult> WriteAsync(SendSectionWrite send, int zone, ZoneAttributes attributes, CancellationToken ct)
-    {
-        var value = (ushort)attributes;
-        var result = await send(new SectionWrite { SectionAddress = [2, (ushort)zone], SectionData = [(byte)(value >> 8), (byte)(value & 0xFF)] }, ct);
+    {        
+        var result = await send(new SectionWrite { SectionAddress = [2, (ushort)zone], SectionData = [(byte)attributes.Functional, (byte)attributes.Physical] }, ct);
         if (result.Success)
             _values[zone - 1] = attributes;
         return result;
     }
 }
 
+public readonly record struct ZoneAttributes(ZoneFunctionalAttributes Functional, ZonePhysicalAttributes Physical);
+
 [Flags]
-public enum ZoneAttributes : ushort
+public enum ZoneFunctionalAttributes : byte
 {
-    IsAudible = 1,
-    IsPulsedOrSteady = 2,
-    IsDoorChime = IsPulsedOrSteady | IsAudible,
-    IsBypassable = 4,
-    IsForceArmable = IsBypassable | IsAudible,
-    IsSwingerShutdown = IsBypassable | IsPulsedOrSteady,
-    IsTransmissionDelay = IsSwingerShutdown | IsAudible,
-    IsBurglaryVerified = 8,
-    IsNormallyClosedLoop = IsBurglaryVerified | IsAudible,
-    IsSingleEOLResistor = IsBurglaryVerified | IsPulsedOrSteady,
-    IsDoubleEOLResistor = IsSingleEOLResistor | IsAudible,
-    IsFastLoopResponse = IsBurglaryVerified | IsBypassable,
-    IsTwoWayAudio = IsFastLoopResponse | IsAudible,
-    IsHoldupVerified = IsFastLoopResponse | IsPulsedOrSteady,
+    IsAudible = 0x01,
+    IsPulsedOrSteady = 0x02,
+    IsDoorChime = 0x04,
+    IsBypassable = 0x08,
+    IsForceArmable = 0x10,
+    IsSwingerShutdown = 0x20,
+    IsTransmissionDelay = 0x40,
+    IsBurglaryVerified = 0x80,
+}
+[Flags]
+public enum ZonePhysicalAttributes : byte
+{
+    IsNormallyClosedLoop = 0x01,
+    IsSingleEOLResistor = 0x02,
+    IsDoubleEOLResistor = 0x04,
+    IsFastLoopResponse = 0x08,
+    IsTwoWayAudio = 0x10,
+    IsHoldupVerified = 0x20,
 }

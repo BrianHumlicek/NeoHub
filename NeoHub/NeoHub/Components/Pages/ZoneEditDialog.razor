@@ -28,16 +28,48 @@
                 }
             </MudSelect>
 
-            @* ── Zone Attributes ── *@
-            <MudText Typo="Typo.subtitle2">Zone Attributes</MudText>
-            <MudStack>
-                @foreach (var flag in IndividualFlags)
+            @* ── Zone Attributes [002] ── *@
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="6">
+                    <MudText Typo="Typo.subtitle2">Functional Attributes</MudText>
+                    <MudStack>
+                        @foreach (var flag in FunctionalFlags)
+                        {
+                            var f = flag;
+                            <MudCheckBox T="bool"
+                                         Value="@_attributes.Functional.HasFlag(f)"
+                                         ValueChanged="@(v => ToggleFunctional(f, v))"
+                                         Label="@FormatEnumName(f.ToString()).Replace("Is ", "")"
+                                         Dense="true" />
+                        }
+                    </MudStack>
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudText Typo="Typo.subtitle2">Physical Attributes</MudText>
+                    <MudStack>
+                        @foreach (var flag in PhysicalFlags)
+                        {
+                            var f = flag;
+                            <MudCheckBox T="bool"
+                                         Value="@_attributes.Physical.HasFlag(f)"
+                                         ValueChanged="@(v => TogglePhysical(f, v))"
+                                         Label="@FormatEnumName(f.ToString()).Replace("Is ", "")"
+                                         Dense="true" />
+                        }
+                    </MudStack>
+                </MudItem>
+            </MudGrid>
+
+            @* ── Event Reporting [307] ── *@
+            <MudText Typo="Typo.subtitle2">Event Reporting</MudText>
+            <MudStack Row="true" Spacing="4" Wrap="Wrap.Wrap">
+                @foreach (var flag in EventReportingFlags)
                 {
                     var f = flag;
                     <MudCheckBox T="bool"
-                                 Value="@_attributes.HasFlag(f)"
-                                 ValueChanged="@(v => ToggleFlag(f, v))"
-                                 Label="@FormatEnumName(f.ToString()).Replace("Is ", "")"
+                                 Value="@_eventReporting.HasFlag(f)"
+                                 ValueChanged="@(v => ToggleEventReporting(f, v))"
+                                 Label="@FormatEnumName(f.ToString())"
                                  Dense="true" />
                 }
             </MudStack>
@@ -121,20 +153,30 @@
     private string _line1 = "";
     private string _line2 = "";
     private ZoneDefinition _definition;
-    private ZoneAttributes _attributes;
+    private ZoneAttributes _attributes = new(default, default);
+    private ZoneEventReportingAttributes _eventReporting;
     private bool[] _partitionAssigned = [];
     private bool _saving;
 
     // Original values for dirty checking
     private string _origLabel = "";
     private ZoneDefinition _origDefinition;
-    private ZoneAttributes _origAttributes;
+    private ZoneAttributes _origAttributes = new(default, default);
+    private ZoneEventReportingAttributes _origEventReporting;
     private bool[] _origPartitionAssigned = [];
 
     private string CombinedLabel => (_line1.PadRight(14) + _line2.PadRight(14)).TrimEnd();
 
-    private static readonly ZoneAttributes[] IndividualFlags = Enum.GetValues<ZoneAttributes>()
-        .Where(f => f != 0 && (f & (f - 1)) == 0)
+    private static readonly ZoneFunctionalAttributes[] FunctionalFlags = Enum.GetValues<ZoneFunctionalAttributes>()
+        .Where(f => f != 0 && ((byte)f & ((byte)f - 1)) == 0)
+        .ToArray();
+
+    private static readonly ZonePhysicalAttributes[] PhysicalFlags = Enum.GetValues<ZonePhysicalAttributes>()
+        .Where(f => f != 0 && ((byte)f & ((byte)f - 1)) == 0)
+        .ToArray();
+
+    private static readonly ZoneEventReportingAttributes[] EventReportingFlags = Enum.GetValues<ZoneEventReportingAttributes>()
+        .Where(f => f != 0 && ((byte)f & ((byte)f - 1)) == 0)
         .ToArray();
 
     protected override void OnParametersSet()
@@ -143,6 +185,7 @@
         var zoneDefs = Config.ZoneDefinitions.Values;
         var zoneLabels = Config.ZoneLabels.Values;
         var zoneAttrs = Config.ZoneAttributes.Values;
+        var zoneEventReporting = Config.ZoneEventReporting.Values;
         var assignments = Config.ZoneAssignments.Values;
         int maxPartitions = Config.Capabilities.MaxPartitions;
 
@@ -150,7 +193,8 @@
         var rawLabel = zoneIndex < zoneLabels.Count ? (zoneLabels[zoneIndex] ?? "") : "";
         _line1 = rawLabel.Length >= 14 ? rawLabel[..14].TrimEnd() : rawLabel.TrimEnd();
         _line2 = rawLabel.Length > 14 ? rawLabel[14..Math.Min(28, rawLabel.Length)].TrimEnd() : "";
-        _attributes = zoneIndex < zoneAttrs.Count ? zoneAttrs[zoneIndex] : 0;
+        _attributes = zoneIndex < zoneAttrs.Count ? zoneAttrs[zoneIndex] : new ZoneAttributes(default, default);
+        _eventReporting = zoneIndex < zoneEventReporting.Count ? zoneEventReporting[zoneIndex] : default;
 
         _partitionAssigned = new bool[maxPartitions];
         for (int p = 0; p < maxPartitions; p++)
@@ -163,6 +207,7 @@
         _origLabel = CombinedLabel;
         _origDefinition = _definition;
         _origAttributes = _attributes;
+        _origEventReporting = _eventReporting;
         _origPartitionAssigned = _partitionAssigned.ToArray();
     }
 
@@ -170,11 +215,14 @@
     private void OnLine2Input(ChangeEventArgs e) => _line2 = Truncate(e.Value?.ToString(), 14);
     private static string Truncate(string? s, int max) => string.IsNullOrEmpty(s) ? "" : s.Length > max ? s[..max] : s;
 
-    private void ToggleFlag(ZoneAttributes flag, bool set)
-    {
-        if (set) _attributes |= flag;
-        else _attributes &= ~flag;
-    }
+    private void ToggleFunctional(ZoneFunctionalAttributes flag, bool set) =>
+        _attributes = _attributes with { Functional = set ? _attributes.Functional | flag : _attributes.Functional & ~flag };
+
+    private void TogglePhysical(ZonePhysicalAttributes flag, bool set) =>
+        _attributes = _attributes with { Physical = set ? _attributes.Physical | flag : _attributes.Physical & ~flag };
+
+    private void ToggleEventReporting(ZoneEventReportingAttributes flag, bool set) =>
+        _eventReporting = set ? _eventReporting | flag : _eventReporting & ~flag;
 
     private static string FormatEnumName(string name) =>
         System.Text.RegularExpressions.Regex.Replace(name, @"(\p{Ll})(\p{Lu})", "$1 $2")
@@ -203,6 +251,12 @@
                     {
                         var r = await Config.ZoneAttributes.WriteAsync(send, ZoneNumber, _attributes, CancellationToken.None);
                         if (!r.Success) errors.Add($"Attributes: {r.ErrorMessage}");
+                    }
+
+                    if (_eventReporting != _origEventReporting)
+                    {
+                        var r = await Config.ZoneEventReporting.WriteAsync(send, ZoneNumber, _eventReporting, CancellationToken.None);
+                        if (!r.Success) errors.Add($"Event reporting: {r.ErrorMessage}");
                     }
 
                     if (CombinedLabel != _origLabel)

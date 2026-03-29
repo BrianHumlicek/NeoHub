@@ -188,6 +188,8 @@
     private bool _tlinkOnly = true;
     private bool _autoScroll = true;
     private bool _disposed;
+    private bool _logDirty;
+    private Timer? _logRenderTimer;
 
     private static readonly IReadOnlyList<MessageTypeInfo> _catalog = MessageCatalog.GetSendable();
 
@@ -199,12 +201,31 @@
 
         foreach (var entry in LogService.GetLogs().TakeLast(200))
             _rawLogEntries.Add(entry);
+
+        // Periodic render for log updates — avoids per-entry StateHasChanged()
+        // which can overwhelm the renderer during startup bursts and race with
+        // circuit teardown on browser refresh.
+        _logRenderTimer = new Timer(_ => InvokeAsync(() =>
+        {
+            if (_disposed || !_logDirty) return;
+            try
+            {
+                _logDirty = false;
+                StateHasChanged();
+            }
+            catch (ObjectDisposedException) { }
+        }), null, 200, 200);
     }
 
-    protected override async Task OnAfterRenderAsync(bool firstRender)
+    protected override Task OnAfterRenderAsync(bool firstRender)
     {
+        // Fire-and-forget: awaiting JS interop here releases the sync context,
+        // which allows queued InvokeAsync callbacks (from OnLogReceived / timer)
+        // to run and call StateHasChanged() mid-render — causing a re-entrant
+        // render that crashes the diff builder with NullReferenceException.
         if (_autoScroll)
-            await JS.InvokeVoidAsync("scrollToBottom", "dev-log-container");
+            _ = JS.InvokeVoidAsync("scrollToBottom", "dev-log-container");
+        return Task.CompletedTask;
     }
 
     private void RefreshSessions()
@@ -238,7 +259,7 @@
                 _rawLogEntries.Add(entry);
                 if (_rawLogEntries.Count > 300)
                     _rawLogEntries.RemoveAt(0);
-                StateHasChanged();
+                _logDirty = true;
             }
             catch (ObjectDisposedException) { }
         });
@@ -277,24 +298,61 @@
         _buildError = null;
         _response = null;
 
+        if (info is null) return;
+
+        // Instantiate the message so the form starts with the actual default
+        // property values (e.g. Partition = 1) instead of type-based guesses.
+        object? defaults = null;
+        try { defaults = Activator.CreateInstance(info.MessageType); }
+        catch { /* fall through to type-based defaults */ }
+
         foreach (var prop in _editableProperties)
         {
+            var defaultValue = defaults is not null ? prop.GetValue(defaults) : null;
+
             if (prop.PropertyType == typeof(bool))
-                _boolValues[prop.Name] = false;
+                _boolValues[prop.Name] = defaultValue is bool b && b;
             else
-                _stringValues[prop.Name] = GetDefaultStringValue(prop);
+                _stringValues[prop.Name] = FormatDefaultValue(prop, defaultValue);
         }
     }
 
-    private static string GetDefaultStringValue(PropertyInfo prop)
+    /// <summary>
+    /// Formats a property's actual default value for display in the text field.
+    /// Nullable types show blank when null; non-nullable value types always show
+    /// their default so the field is never left empty.
+    /// </summary>
+    private static string FormatDefaultValue(PropertyInfo prop, object? defaultValue)
     {
-        if (prop.PropertyType.IsEnum)
-            return Enum.GetNames(prop.PropertyType).FirstOrDefault() ?? string.Empty;
-        if (prop.PropertyType == typeof(string) || prop.PropertyType == typeof(byte[]) || IsValueTypeArray(prop.PropertyType))
+        var type = prop.PropertyType;
+
+        if (Nullable.GetUnderlyingType(type) is not null)
+            return defaultValue?.ToString() ?? string.Empty;
+
+        if (type.IsEnum)
+            return defaultValue?.ToString()
+                ?? Enum.GetNames(type).FirstOrDefault()
+                ?? string.Empty;
+
+        if (type == typeof(string))
+            return defaultValue as string ?? string.Empty;
+
+        if (type == typeof(byte[]))
+        {
+            if (defaultValue is byte[] { Length: > 0 } bytes)
+                return string.Join(" ", bytes.Select(b => b.ToString("X2")));
             return string.Empty;
-        if (Nullable.GetUnderlyingType(prop.PropertyType) is not null)
+        }
+
+        if (IsValueTypeArray(type))
+        {
+            if (defaultValue is Array { Length: > 0 } arr)
+                return string.Join(", ", arr.Cast<object>());
             return string.Empty;
-        return "0";
+        }
+
+        // Non-nullable value types (int, byte, etc.) — always show the default
+        return defaultValue?.ToString() ?? "0";
     }
 
     // Build a RenderFragment per property to keep the foreach loop body clean.
@@ -544,6 +602,7 @@
     public void Dispose()
     {
         _disposed = true;
+        _logRenderTimer?.Dispose();
         SessionMonitor.SessionsChanged -= OnSessionsChanged;
         LogService.LogReceived -= OnLogReceived;
     }

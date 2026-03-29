@@ -52,6 +52,45 @@ public readonly struct HexBytes
 }
 
 /// <summary>
+/// Lazy hex formatter for word-sized numeric arrays (ushort, uint).
+/// Formats each element with the appropriate hex width: ushort → X4, uint → X8.
+/// Output: [12F9-A19E-1252]
+/// Usage: _logger.LogTrace("Data {Words}", new HexWords<ushort>(data));
+/// </summary>
+public readonly struct HexWords<T> where T : struct, IFormattable
+{
+    private readonly ReadOnlyMemory<T> _data;
+
+    private static readonly string _format = Type.GetTypeCode(typeof(T)) switch
+    {
+        TypeCode.UInt16 => "X4",
+        TypeCode.UInt32 => "X8",
+        TypeCode.Int16  => "X4",
+        TypeCode.Int32  => "X8",
+        _               => "X"
+    };
+
+    public HexWords(T[] data) => _data = data;
+    public HexWords(ReadOnlyMemory<T> data) => _data = data;
+
+    public override string ToString()
+    {
+        var span = _data.Span;
+        if (span.IsEmpty) return "[]";
+
+        var sb = new StringBuilder();
+        sb.Append('[');
+        for (int i = 0; i < span.Length; i++)
+        {
+            if (i > 0) sb.Append('-');
+            sb.Append(span[i].ToString(_format, null));
+        }
+        sb.Append(']');
+        return sb.ToString();
+    }
+}
+
+/// <summary>
 /// Hex editor-style grid formatter for larger byte arrays.
 /// Produces 16 bytes per row with a mid-row space, a leading offset column, and a length header.
 /// Usage: new HexGrid(data).ToString()
@@ -145,10 +184,18 @@ public readonly struct MessageLog
         byte[] bytes when bytes.Length > 8 => new HexGrid(bytes).ToString(),
         byte[] bytes => new HexBytes(bytes).ToString(),
         IEnumerable<byte> bytes => new HexBytes(bytes.ToArray()).ToString(),
+        ushort[] words => new HexWords<ushort>(words).ToString(),
+        uint[] dwords => new HexWords<uint>(dwords).ToString(),
         string str => $"\"{str}\"",
         string[] strs => FormatStringArray(strs, indentLevel),
         IMessageData[] messages => FormatMessageArray(messages, indentLevel),
         Array array when IsComplexArray(array) => FormatObjectArray(array, indentLevel),
+        byte v   => $"0x{v:X2} ({v})",
+        sbyte v  => $"0x{v:X2} ({v})",
+        ushort v => $"0x{v:X4} ({v})",
+        short v  => $"0x{v:X4} ({v})",
+        uint v   => $"0x{v:X8} ({v})",
+        int v    => $"0x{v:X8} ({v})",
         _ => value.ToString() ?? "null"
     };
 

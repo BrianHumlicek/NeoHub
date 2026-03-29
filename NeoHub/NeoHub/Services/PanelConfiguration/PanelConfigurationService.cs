@@ -62,6 +62,7 @@ public class PanelConfigurationService : IPanelConfigurationService
 
         await ReadSectionAsync("zone definitions", () => config.ZoneDefinitions.ReadAllAsync(send, ct));
         await ReadSectionAsync("zone attributes", () => config.ZoneAttributes.ReadAllAsync(send, ct));
+        await ReadSectionAsync("zone event reporting", () => config.ZoneEventReporting.ReadAllAsync(send, ct));
         await ReadSectionAsync("partition enables", () => config.PartitionEnables.ReadAllAsync(send, ct));
         await ReadSectionAsync("zone assignments", () => config.ZoneAssignments.ReadAllAsync(send, ct));
         await ReadSectionAsync("zone labels", () => config.ZoneLabels.ReadAllAsync(send, ct));

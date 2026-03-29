@@ -13,6 +13,7 @@ public class PanelConfigurationState
 
     public ZoneDefinitionSection ZoneDefinitions { get; }
     public ZoneAttributeSection ZoneAttributes { get; }
+    public ZoneEventReportingSection ZoneEventReporting { get; }
     public ZoneLabelSection ZoneLabels { get; }
     public ZoneAssignmentSection ZoneAssignments { get; }
     public PartitionLabelSection PartitionLabels { get; }
@@ -25,6 +26,7 @@ public class PanelConfigurationState
         Capabilities = capabilities;
         ZoneDefinitions = new(capabilities);
         ZoneAttributes = new(capabilities);
+        ZoneEventReporting = new(capabilities);
         ZoneLabels = new(capabilities);
         ZoneAssignments = new(capabilities);
         PartitionLabels = new(capabilities);

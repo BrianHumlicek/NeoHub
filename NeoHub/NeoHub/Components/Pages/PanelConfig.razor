@@ -89,7 +89,7 @@
                                 <th style="min-width:80px;">Status</th>
                                 <th style="min-width:200px;">Label</th>
                                 <th style="min-width:150px;">Definition</th>
-                                <th style="min-width:180px;">Attributes</th>
+                                <th>Attributes</th>
                                 <th style="min-width:80px;">Partitions</th>
                             </tr>
                         </thead>
@@ -98,6 +98,7 @@
                                 var zoneLabels = _config.ZoneLabels.Values;
                                 var zoneValues = _config.ZoneDefinitions.Values;
                                 var zoneAttrs = _config.ZoneAttributes.Values;
+                                var zoneAlarmAttrs = _config.ZoneEventReporting.Values;
                                 var assignments = _config.ZoneAssignments.Values;
                                 int maxPartitions = _config.Capabilities.MaxPartitions;
                                 int maxZones = _config.Capabilities.MaxZones;
@@ -107,7 +108,8 @@
                                 var zoneNum = z + 1;
                                 var def = z < zoneValues.Count ? zoneValues[z] : ZoneDefinition.NullZone;
                                 var label = z < zoneLabels.Count ? zoneLabels[z] : null;
-                                var attrs = z < zoneAttrs.Count ? zoneAttrs[z] : (ZoneAttributes)0;
+                                var attrs = z < zoneAttrs.Count ? zoneAttrs[z] : default;
+                                var alarmAttrs = z < zoneAlarmAttrs.Count ? zoneAlarmAttrs[z] : default;
                                 var isNull = def == ZoneDefinition.NullZone;
                                 var zoneState = _session?.Zones.GetValueOrDefault((byte)zoneNum);
 
@@ -122,7 +124,19 @@
                                         }
                                     </td>
                                     <td>@(isNull ? "—" : FormatEnumName(def.ToString()))</td>
-                                    <td style="font-size: 0.8em;">@FormatAttributes(attrs)</td>
+                                    <td>
+                                        @{
+                                            var allZero = (byte)attrs.Functional == 0 && (byte)attrs.Physical == 0 && (byte)alarmAttrs == 0;
+                                        }
+                                        <MudTooltip Placement="Placement.Left" Arrow="true">
+                                            <ChildContent>
+                                                <span style="font-family:monospace; font-size:0.8em; white-space:nowrap;@(allZero ? " opacity:0.3;" : "")">@($"{(byte)attrs.Functional:X2}·{(byte)attrs.Physical:X2}·{(byte)alarmAttrs:X2}")</span>
+                                            </ChildContent>
+                                            <TooltipContent>
+                                                @RenderAttributeTooltip(attrs, alarmAttrs)
+                                            </TooltipContent>
+                                        </MudTooltip>
+                                    </td>
                                     <td>
                                         <div style="display: flex; gap: 3px; align-items: center;">
                                             @for (int p = 0; p < maxPartitions; p++)
@@ -442,20 +456,32 @@
         <MudChip T="string" Size="Size.Small" Color="@color">@FormatEnumName(status.ToString())</MudChip>;
     };
 
-    private static string FormatAttributes(ZoneAttributes attrs)
+    private static RenderFragment RenderAttributeTooltip(ZoneAttributes attrs, ZoneEventReportingAttributes evtRpt) => __builder =>
     {
-        if (attrs == 0) return "—";
-        var flags = new List<string>();
-        foreach (ZoneAttributes flag in Enum.GetValues<ZoneAttributes>())
-        {
-            if (flag == 0) continue;
-            // Only show individual bit flags, not combinations
-            if ((flag & (flag - 1)) != 0) continue;
-            if (attrs.HasFlag(flag))
-                flags.Add(FormatEnumName(flag.ToString()).Replace("Is ", ""));
-        }
-        return flags.Count > 0 ? string.Join(", ", flags) : $"0x{(ushort)attrs:X4}";
-    }
+        <div style="font-size:0.85em; line-height:1.6;">
+            <div style="font-weight:600; margin-bottom:2px;">Functional [@($"{(byte)attrs.Functional:X2}")]</div>
+            @foreach (var f in Enum.GetValues<ZoneFunctionalAttributes>())
+            {
+                if (f == 0 || ((byte)f & ((byte)f - 1)) != 0) continue;
+                var on = attrs.Functional.HasFlag(f);
+                <div style="padding-left:10px;@(on ? "" : " opacity:0.3;")">@FormatEnumName(f.ToString()).Replace("Is ", "")</div>
+            }
+            <div style="font-weight:600; margin-top:6px; margin-bottom:2px;">Physical [@($"{(byte)attrs.Physical:X2}")]</div>
+            @foreach (var f in Enum.GetValues<ZonePhysicalAttributes>())
+            {
+                if (f == 0 || ((byte)f & ((byte)f - 1)) != 0) continue;
+                var on = attrs.Physical.HasFlag(f);
+                <div style="padding-left:10px;@(on ? "" : " opacity:0.3;")">@FormatEnumName(f.ToString()).Replace("Is ", "")</div>
+            }
+            <div style="font-weight:600; margin-top:6px; margin-bottom:2px;">Event Reporting [@($"{(byte)evtRpt:X2}")]</div>
+            @foreach (var f in Enum.GetValues<ZoneEventReportingAttributes>())
+            {
+                if (f == 0 || ((byte)f & ((byte)f - 1)) != 0) continue;
+                var on = evtRpt.HasFlag(f);
+                <div style="padding-left:10px;@(on ? "" : " opacity:0.3;")">@FormatEnumName(f.ToString())</div>
+            }
+        </div>
+    };
 
     public void Dispose()
     {

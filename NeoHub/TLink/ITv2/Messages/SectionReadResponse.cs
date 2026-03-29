@@ -6,7 +6,7 @@ namespace DSC.TLink.ITv2.Messages;
 public record SectionReadResponse : IMessageData
 {
     private readonly SectionMessageSerializer _sectionSerializer = new();
-    public byte[] MessageBytes
+    internal byte[] MessageBytes
     {
         get => _sectionSerializer.MessageBytes;
         set => _sectionSerializer.MessageBytes = value;
