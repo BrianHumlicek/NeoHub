@@ -48,7 +48,7 @@ namespace NeoHub.Services.Handlers
 
             // Ensure the session exists — it may not have been created yet
             // since the connected notification fires early in the lifecycle.
-            _panelState.UpdateSession(sessionId, _ => { });
+            _panelState.UpdateSession(sessionId, s => s.ConnectionPhase = ConnectionPhase.Handshake);
             var session = _panelState.GetSession(sessionId)!;
 
             // Acquire the config lock for the entire initialization sequence.
@@ -91,6 +91,7 @@ namespace NeoHub.Services.Handlers
                     effectiveZones, capabilities.MaxZones, maxZonesSetting > 0 ? maxZonesSetting : "unlimited");
 
                 // ── 2. Labels: installer config vs. explicit pull ──
+                _panelState.UpdateSession(sessionId, s => s.ConnectionPhase = ConnectionPhase.ReadingConfig);
                 var installerCode = _appSettings.CurrentValue.DefaultInstallerCode;
                 if (!string.IsNullOrEmpty(installerCode))
                 {
@@ -119,9 +120,11 @@ namespace NeoHub.Services.Handlers
                 }
 
                 // ── 3. Status reads (always) ──
+                _panelState.UpdateSession(sessionId, s => s.ConnectionPhase = ConnectionPhase.ReadingStatus);
                 await PullPartitionStatusAsync(sessionId, capabilities.MaxPartitions, cancellationToken);
                 await PullZoneStatusAsync(sessionId, effectiveZones, cancellationToken);
 
+                _panelState.UpdateSession(sessionId, s => s.ConnectionPhase = ConnectionPhase.Connected);
                 _panelState.OnConfigurationComplete(sessionId);
                 _logger.LogInformation("Panel configuration pull complete");
             }

@@ -36,11 +36,24 @@
 
             <MudPaper Elevation="2" Class="pa-4 mb-4" Outlined="@(!isConnected)">
                 @* ── Connection header ── *@
+                @{
+                    var phase = session?.ConnectionPhase ?? ConnectionPhase.Disconnected;
+                    var phaseInfo = GetPhaseInfo(phase, isConnected);
+                }
                 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
-                    <MudIcon Icon="@(isConnected ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.LinkOff)"
-                             Color="@(isConnected ? Color.Success : Color.Default)"
-                             Size="Size.Small" />
+                    @if (phaseInfo.IsAnimated)
+                    {
+                        <MudProgressCircular Color="@phaseInfo.Color" Size="Size.Small" Indeterminate="true" />
+                    }
+                    else
+                    {
+                        <MudIcon Icon="@phaseInfo.Icon" Color="@phaseInfo.Color" Size="Size.Small" />
+                    }
                     <MudText Typo="Typo.h6">@sessionId</MudText>
+                    <MudChip T="string" Size="Size.Small" Color="@phaseInfo.Color"
+                             Variant="@(phaseInfo.IsAnimated ? Variant.Filled : Variant.Outlined)">
+                        @phaseInfo.Label
+                    </MudChip>
                     @if (isConnected && session?.PanelDateTimeNow is DateTime panelTime)
                     {
                         <MudText Typo="Typo.caption" Color="Color.Secondary">
@@ -394,6 +407,21 @@
 		_ when partition.IsReady => Color.Success,
 		_ => Color.Warning
 	};
+
+	private static (Color Color, string Icon, string Label, bool IsAnimated) GetPhaseInfo(ConnectionPhase phase, bool isConnected)
+	{
+		if (!isConnected)
+			return (Color.Default, Icons.Material.Filled.LinkOff, "Disconnected", false);
+
+		return phase switch
+		{
+			ConnectionPhase.Handshake => (Color.Info, Icons.Material.Filled.Handshake, "Handshake", true),
+			ConnectionPhase.ReadingConfig => (Color.Info, Icons.Material.Filled.Settings, "Reading Config", true),
+			ConnectionPhase.ReadingStatus => (Color.Info, Icons.Material.Filled.Sync, "Reading Status", true),
+			ConnectionPhase.Connected => (Color.Success, Icons.Material.Filled.CheckCircle, "Connected", false),
+			_ => (Color.Warning, Icons.Material.Filled.HourglassEmpty, "Connecting", true),
+		};
+	}
 
 	private async Task ArmPartitionAsync(string sessionId, byte partition, ArmingMode mode)
 	{

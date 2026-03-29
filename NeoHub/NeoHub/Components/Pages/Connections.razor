@@ -38,13 +38,21 @@
                 var isConnected = activeSessions.Contains(conn.SessionId);
                 var session = isConnected ? PanelState.GetSession(conn.SessionId) : null;
                 var status = GetConnectionStatus(conn, isConnected);
+                var isInitializing = isConnected && session?.ConnectionPhase is not ConnectionPhase.Connected and not ConnectionPhase.Disconnected;
 
                 <MudCard Elevation="2" Outlined="true">
                     <MudCardHeader>
                         <CardHeaderAvatar>
-                            <MudAvatar Color="@status.Color" Size="Size.Small">
-                                <MudIcon Icon="@status.Icon" Size="Size.Small" />
-                            </MudAvatar>
+                            @if (isInitializing)
+                            {
+                                <MudProgressCircular Color="@status.Color" Size="Size.Small" Indeterminate="true" />
+                            }
+                            else
+                            {
+                                <MudAvatar Color="@status.Color" Size="Size.Small">
+                                    <MudIcon Icon="@status.Icon" Size="Size.Small" />
+                                </MudAvatar>
+                            }
                         </CardHeaderAvatar>
                         <CardHeaderContent>
                             <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
@@ -219,6 +227,7 @@
     {
         RefreshData();
         SessionMonitor.SessionsChanged += OnSessionsChanged;
+        PanelState.SessionStateChanged += OnStateChanged;
         UpdateRefreshTimer();
     }
 
@@ -237,6 +246,20 @@
             {
                 RefreshData();
                 UpdateRefreshTimer();
+                StateHasChanged();
+            }
+            catch (ObjectDisposedException) { }
+        });
+    }
+
+    private void OnStateChanged(object? sender, EventArgs e)
+    {
+        InvokeAsync(() =>
+        {
+            if (_disposed) return;
+            try
+            {
+                RefreshData();
                 StateHasChanged();
             }
             catch (ObjectDisposedException) { }
@@ -329,13 +352,22 @@
 
     private (Color Color, string Icon, string Label) GetConnectionStatus(ConnectionSettings conn, bool isConnected)
     {
-        if (isConnected)
-            return (Color.Success, Icons.Material.Filled.CheckCircle, "Connected");
+        if (!isConnected)
+        {
+            if (!conn.IsComplete)
+                return (Color.Warning, Icons.Material.Filled.Warning, "Needs Configuration");
+            return (Color.Default, Icons.Material.Filled.LinkOff, "Disconnected");
+        }
 
-        if (!conn.IsComplete)
-            return (Color.Warning, Icons.Material.Filled.Warning, "Needs Configuration");
-
-        return (Color.Default, Icons.Material.Filled.LinkOff, "Disconnected");
+        var session = PanelState.GetSession(conn.SessionId);
+        return session?.ConnectionPhase switch
+        {
+            ConnectionPhase.Handshake => (Color.Info, Icons.Material.Filled.Handshake, "Handshake"),
+            ConnectionPhase.ReadingConfig => (Color.Info, Icons.Material.Filled.Settings, "Reading Config"),
+            ConnectionPhase.ReadingStatus => (Color.Info, Icons.Material.Filled.Sync, "Reading Status"),
+            ConnectionPhase.Connected => (Color.Success, Icons.Material.Filled.CheckCircle, "Connected"),
+            _ => (Color.Warning, Icons.Material.Filled.HourglassEmpty, "Connecting"),
+        };
     }
 
     private string GetConnectionSummary(ConnectionSettings conn, SessionState? session)
@@ -396,5 +428,6 @@
         _disposed = true;
         _refreshTimer?.Dispose();
         SessionMonitor.SessionsChanged -= OnSessionsChanged;
+        PanelState.SessionStateChanged -= OnStateChanged;
     }
 }

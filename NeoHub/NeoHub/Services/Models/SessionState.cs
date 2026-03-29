@@ -9,6 +9,7 @@ namespace NeoHub.Services.Models
     {
         public required string SessionId { get; init; }
         public string Name => SessionId; // TODO: Allow friendly names
+        public ConnectionPhase ConnectionPhase { get; set; }
         public int MaxZones { get; set; }
         public int MaxPartitions { get; set; }
         public Dictionary<byte, PartitionState> Partitions { get; } = new();
