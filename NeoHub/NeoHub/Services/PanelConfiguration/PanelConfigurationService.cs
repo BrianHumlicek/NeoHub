@@ -60,13 +60,20 @@ public class PanelConfigurationService : IPanelConfigurationService
 
         _logger.LogInformation("Reading panel configuration sections");
 
-        await ReadSectionAsync("zone definitions", () => config.ZoneDefinitions.ReadAllAsync(send, ct));
-        await ReadSectionAsync("zone attributes", () => config.ZoneAttributes.ReadAllAsync(send, ct));
-        await ReadSectionAsync("zone event reporting", () => config.ZoneEventReporting.ReadAllAsync(send, ct));
-        await ReadSectionAsync("partition enables", () => config.PartitionEnables.ReadAllAsync(send, ct));
-        await ReadSectionAsync("zone assignments", () => config.ZoneAssignments.ReadAllAsync(send, ct));
-        await ReadSectionAsync("zone labels", () => config.ZoneLabels.ReadAllAsync(send, ct));
-        await ReadSectionAsync("partition labels", () => config.PartitionLabels.ReadAllAsync(send, ct));
+        foreach (var section in config.AllSections)
+        {
+            if (!section.IsSupported) continue;
+
+            try
+            {
+                await section.ReadAllAsync(send, ct);
+                _logger.LogDebug("Read {Section}", section.DisplayName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to read {Section}", section.DisplayName);
+            }
+        }
 
         config.LastReadAt = DateTime.UtcNow;
 
@@ -120,19 +127,6 @@ public class PanelConfigurationService : IPanelConfigurationService
         finally
         {
             await ExitConfigModeAsync(sessionId, ct);
-        }
-    }
-
-    private async Task ReadSectionAsync(string name, Func<Task> read)
-    {
-        try
-        {
-            await read();
-            _logger.LogDebug("Read {Section}", name);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to read {Section}", name);
         }
     }
 

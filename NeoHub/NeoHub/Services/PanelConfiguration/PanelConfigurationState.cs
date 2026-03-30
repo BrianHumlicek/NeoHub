@@ -19,6 +19,9 @@ public class PanelConfigurationState
     public PartitionLabelSection PartitionLabels { get; }
     public PartitionEnableSection PartitionEnables { get; }
 
+    /// <summary>All sections in read order, for generic iteration (read, export, import).</summary>
+    public IReadOnlyList<IConfigSection> AllSections { get; }
+
     public DateTime? LastReadAt { get; set; }
 
     public PanelConfigurationState(PanelCapabilities capabilities)
@@ -31,5 +34,16 @@ public class PanelConfigurationState
         ZoneAssignments = new(capabilities);
         PartitionLabels = new(capabilities);
         PartitionEnables = new(capabilities);
+
+        AllSections =
+        [
+            ZoneDefinitions,
+            ZoneAttributes,
+            ZoneEventReporting,
+            PartitionEnables,
+            ZoneAssignments,
+            ZoneLabels,
+            PartitionLabels,
+        ];
     }
 }

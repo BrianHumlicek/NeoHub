@@ -1,61 +1,27 @@
-using DSC.TLink.ITv2.Messages;
-
 namespace NeoHub.Services.PanelConfiguration.Sections;
 
 /// <summary>
 /// Partition enable/disable from installer programming section [200].
 /// Address: [200][partition] — one byte per partition.
 /// </summary>
-public class PartitionEnableSection
+public class PartitionEnableSection(PanelCapabilities capabilities)
+    : SectionGroup<PartitionEnable>(capabilities)
 {
-    private readonly PanelCapabilities _capabilities;
-    private PartitionEnable[] _values = [];
+    public override string DisplayName => "Partition Enable";
+    public override int MaxItems => Capabilities.MaxPartitions;
 
-    public IReadOnlyList<PartitionEnable> Values => _values;
+    protected override ushort[] GetItemAddress(int item) => [200, (ushort)item];
 
-    /// <summary>Snapshot of all partitions with enable status, 1-indexed.</summary>
-    public IReadOnlyList<(int Number, PartitionEnable Value)> Items
+    protected override PartitionEnable[] DeserializeAll(byte[] data, int count)
     {
-        get
-        {
-            var values = _values;
-            return values
-                .Select((v, i) => (Number: i + 1, Value: v))
-                .ToList();
-        }
-    }
-
-    public PartitionEnableSection(PanelCapabilities capabilities)
-    {
-        _capabilities = capabilities;
-    }
-
-    public async Task ReadAllAsync(SendSectionRead send, CancellationToken ct)
-    {
-        _values = new PartitionEnable[_capabilities.MaxPartitions];
-
-        var response = await send(new SectionRead { SectionAddress = [200, 1], Count = (byte)_capabilities.MaxPartitions }, ct);
-        if (response?.SectionData is not null)
-        {
-            for (int i = 0; i < Math.Min(response.SectionData.Length, _values.Length); i++)
-                _values[i] = (PartitionEnable)response.SectionData[i];
-        }
-    }
-
-    public async Task ReadAsync(SendSectionRead send, int partition, CancellationToken ct)
-    {
-        var response = await send(new SectionRead { SectionAddress = [200, (ushort)partition] }, ct);
-        if (response?.SectionData is { Length: >= 1 })
-            _values[partition - 1] = (PartitionEnable)response.SectionData[0];
-    }
-
-    public async Task<SectionResult> WriteAsync(SendSectionWrite send, int partition, PartitionEnable enabled, CancellationToken ct)
-    {
-        var result = await send(new SectionWrite { SectionAddress = [200, (ushort)partition], SectionData = [(byte)enabled] }, ct);
-        if (result.Success)
-            _values[partition - 1] = enabled;
+        var result = new PartitionEnable[count];
+        for (int i = 0; i < Math.Min(data.Length, count); i++)
+            result[i] = (PartitionEnable)data[i];
         return result;
     }
+
+    protected override byte[] SerializeAll(PartitionEnable[] values)
+        => values.Select(v => (byte)v).ToArray();
 }
 
 public enum PartitionEnable : byte

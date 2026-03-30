@@ -1,62 +1,31 @@
-using DSC.TLink.ITv2.Messages;
-
 namespace NeoHub.Services.PanelConfiguration.Sections;
 
 /// <summary>
 /// Zone type definitions from installer programming section [001].
 /// Address: [001][zone] — one byte per zone.
 /// </summary>
-public class ZoneDefinitionSection
+public class ZoneDefinitionSection(PanelCapabilities capabilities)
+    : SectionGroup<ZoneDefinition>(capabilities)
 {
-    private readonly PanelCapabilities _capabilities;
-    private ZoneDefinition[] _values = [];
+    public override string DisplayName => "Zone Definition";
+    public override int MaxItems => Capabilities.MaxZones;
 
-    public IReadOnlyList<ZoneDefinition> Values => _values;
+    protected override ushort[] GetItemAddress(int item) => [1, (ushort)item];
 
-    /// <summary>Snapshot of configured zones (filters out NullZone), 1-indexed.</summary>
-    public IReadOnlyList<(int Number, ZoneDefinition Value)> Items
+    protected override ZoneDefinition[] DeserializeAll(byte[] data, int count)
     {
-        get
-        {
-            var values = _values;
-            return values
-                .Select((v, i) => (Number: i + 1, Value: v))
-                .Where(e => e.Value != ZoneDefinition.NullZone)
-                .ToList();
-        }
-    }
-
-    public ZoneDefinitionSection(PanelCapabilities capabilities)
-    {
-        _capabilities = capabilities;
-    }
-
-    public async Task ReadAllAsync(SendSectionRead send, CancellationToken ct)
-    {
-        _values = new ZoneDefinition[_capabilities.MaxZones];
-
-        var response = await send(new SectionRead { SectionAddress = [1, 1], Count = (byte)_capabilities.MaxZones }, ct);
-        if (response?.SectionData is not null)
-        {
-            for (int i = 0; i < Math.Min(response.SectionData.Length, _values.Length); i++)
-                _values[i] = (ZoneDefinition)response.SectionData[i];
-        }
-    }
-
-    public async Task ReadAsync(SendSectionRead send, int zone, CancellationToken ct)
-    {
-        var response = await send(new SectionRead { SectionAddress = [1, (ushort)zone] }, ct);
-        if (response?.SectionData is { Length: >= 1 })
-            _values[zone - 1] = (ZoneDefinition)response.SectionData[0];
-    }
-
-    public async Task<SectionResult> WriteAsync(SendSectionWrite send, int zone, ZoneDefinition definition, CancellationToken ct)
-    {
-        var result = await send(new SectionWrite { SectionAddress = [1, (ushort)zone], SectionData = [(byte)definition] }, ct);
-        if (result.Success)
-            _values[zone - 1] = definition;
+        var result = new ZoneDefinition[count];
+        for (int i = 0; i < Math.Min(data.Length, count); i++)
+            result[i] = (ZoneDefinition)data[i];
         return result;
     }
+
+    protected override byte[] SerializeAll(ZoneDefinition[] values)
+        => values.Select(v => (byte)v).ToArray();
+
+    /// <summary>Snapshot of configured zones (filters out NullZone), 1-indexed.</summary>
+    public override IReadOnlyList<(int Number, ZoneDefinition Value)> Items =>
+        base.Items.Where(e => e.Value != ZoneDefinition.NullZone).ToList();
 }
 
 public enum ZoneDefinition : byte

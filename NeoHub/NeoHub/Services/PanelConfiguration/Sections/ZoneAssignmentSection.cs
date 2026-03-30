@@ -4,13 +4,17 @@ namespace NeoHub.Services.PanelConfiguration.Sections;
 
 /// <summary>
 /// Partition-to-zone assignments from installer programming sections [201+].
-/// Address: [201 + partition - 1][001] with Count = ceil(MaxZones / 8).
-/// Each response byte is a bitmap: bit 7 = first zone in that byte, bit 6 = second, etc.
+/// Address: [201 + partition - 1][byteIdx] — bitmap encoding.
+/// This section does not extend <see cref="SectionGroup{T}"/> because
+/// its 2D bitmap structure and multi-read-per-item addressing are unique.
 /// </summary>
-public class ZoneAssignmentSection
+public class ZoneAssignmentSection : IConfigSection
 {
     private readonly PanelCapabilities _capabilities;
     private bool[,] _assignments = new bool[0, 0]; // [partition, zone] both 0-indexed
+
+    public string DisplayName => "Zone Assignment";
+    public bool IsSupported => true;
 
     /// <summary>
     /// Raw assignment matrix. _assignments[partitionIndex, zoneIndex] where both are 0-indexed.
@@ -49,6 +53,9 @@ public class ZoneAssignmentSection
     {
         _capabilities = capabilities;
     }
+
+    /// <summary>Formats the section address for a given partition (1-indexed).</summary>
+    public string FormatAddress(int partition) => $"[{200 + partition:D3}]";
 
     public async Task ReadAllAsync(SendSectionRead send, CancellationToken ct)
     {
@@ -98,26 +105,6 @@ public class ZoneAssignmentSection
         DecodeBitmap(data, partition - 1, _capabilities.MaxZones);
     }
 
-    private void DecodeBitmap(byte[] data, int partitionIndex, int maxZones)
-    {
-        for (int byteIndex = 0; byteIndex < data.Length; byteIndex++)
-        {
-            byte bitmap = data[byteIndex];
-            for (int bit = 0; bit < 8; bit++)
-            {
-                int zoneIndex = byteIndex * 8 + bit;
-                if (zoneIndex >= maxZones) return;
-
-                // Bit 7 = first zone in the byte, bit 6 = second, etc.
-                _assignments[partitionIndex, zoneIndex] = (bitmap & (0x80 >> bit)) != 0;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Writes the zone assignment bitmap for a single partition.
-    /// Each byte is written individually to match the read pattern.
-    /// </summary>
     public async Task<SectionResult> WriteAsync(SendSectionWrite send, int partition, bool[] zones, CancellationToken ct)
     {
         int maxZones = _capabilities.MaxZones;
@@ -144,7 +131,6 @@ public class ZoneAssignmentSection
                 return result;
         }
 
-        // Update local state on success
         int partIndex = partition - 1;
         for (int z = 0; z < Math.Min(zones.Length, maxZones); z++)
         {
@@ -153,6 +139,57 @@ public class ZoneAssignmentSection
         }
 
         return new(true);
+    }
+
+    /// <summary>Exports all assignment data as a contiguous bitmap buffer (partition-major).</summary>
+    public byte[] Export()
+    {
+        int maxPartitions = _capabilities.MaxPartitions;
+        int maxZones = _capabilities.MaxZones;
+        int bytesPerPartition = (maxZones + 7) / 8;
+        var data = new byte[maxPartitions * bytesPerPartition];
+
+        for (int p = 0; p < maxPartitions; p++)
+        {
+            var bitmap = EncodeBitmap(p, maxZones);
+            Buffer.BlockCopy(bitmap, 0, data, p * bytesPerPartition, bytesPerPartition);
+        }
+
+        return data;
+    }
+
+    /// <summary>Imports assignment data from a contiguous bitmap buffer (partition-major).</summary>
+    public void Import(byte[] data)
+    {
+        int maxPartitions = _capabilities.MaxPartitions;
+        int maxZones = _capabilities.MaxZones;
+        int bytesPerPartition = (maxZones + 7) / 8;
+
+        _assignments = new bool[maxPartitions, maxZones];
+
+        for (int p = 0; p < maxPartitions; p++)
+        {
+            var partitionData = new byte[bytesPerPartition];
+            int offset = p * bytesPerPartition;
+            if (offset + bytesPerPartition <= data.Length)
+                Buffer.BlockCopy(data, offset, partitionData, 0, bytesPerPartition);
+            DecodeBitmap(partitionData, p, maxZones);
+        }
+    }
+
+    private void DecodeBitmap(byte[] data, int partitionIndex, int maxZones)
+    {
+        for (int byteIndex = 0; byteIndex < data.Length; byteIndex++)
+        {
+            byte bitmap = data[byteIndex];
+            for (int bit = 0; bit < 8; bit++)
+            {
+                int zoneIndex = byteIndex * 8 + bit;
+                if (zoneIndex >= maxZones) return;
+
+                _assignments[partitionIndex, zoneIndex] = (bitmap & (0x80 >> bit)) != 0;
+            }
+        }
     }
 
     private byte[] EncodeBitmap(int partitionIndex, int maxZones)

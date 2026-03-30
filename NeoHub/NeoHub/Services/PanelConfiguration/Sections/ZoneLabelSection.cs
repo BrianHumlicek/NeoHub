@@ -7,65 +7,75 @@ namespace NeoHub.Services.PanelConfiguration.Sections;
 /// Zone labels from installer programming section [000][001].
 /// Address: [000][001][zone] — 56 bytes per zone (28 UTF-16BE chars: two 14-char display lines).
 /// </summary>
-public class ZoneLabelSection
+public class ZoneLabelSection(PanelCapabilities capabilities)
+    : SectionGroup<string>(capabilities)
 {
-    private readonly PanelCapabilities _capabilities;
-    private string[] _values = [];
+    private const int CharsPerLabel = 28;
+    private const int BytesPerLabel = CharsPerLabel * 2; // UTF-16BE
+    private const int BatchSize = 4;
 
-    /// <summary>
-    /// Raw label strings (28 chars each, trimmed). First 14 chars = line 1, last 14 = line 2.
-    /// </summary>
-    public IReadOnlyList<string> Values => _values;
+    public override string DisplayName => "Zone Label";
+    public override int MaxItems => Capabilities.MaxZones;
 
-    /// <summary>Snapshot of zones with labels (filters out null/empty), 1-indexed.</summary>
-    public IReadOnlyList<(int Number, string Value)> Items
+    protected override ushort[] GetItemAddress(int item) => [0, 1, (ushort)item];
+
+    protected override string[] DeserializeAll(byte[] data, int count)
     {
-        get
+        var result = new string[count];
+        int labelSize = count > 0 && data.Length > 0 ? data.Length / count : BytesPerLabel;
+        for (int i = 0; i < count && i * labelSize < data.Length; i++)
+            result[i] = Encoding.BigEndianUnicode.GetString(data, i * labelSize, labelSize).TrimEnd();
+        return result;
+    }
+
+    protected override byte[] SerializeAll(string[] values)
+    {
+        var data = new byte[values.Length * BytesPerLabel];
+        for (int i = 0; i < values.Length; i++)
         {
-            var values = _values;
-            return values
-                .Select((v, i) => (Number: i + 1, Value: v))
-                .Where(e => !string.IsNullOrEmpty(e.Value))
-                .ToList();
+            string padded = (values[i] ?? "").PadRight(CharsPerLabel)[..CharsPerLabel];
+            Encoding.BigEndianUnicode.GetBytes(padded, 0, CharsPerLabel, data, i * BytesPerLabel);
         }
+        return data;
     }
 
-    public ZoneLabelSection(PanelCapabilities capabilities)
+    public override async Task ReadAllAsync(SendSectionRead send, CancellationToken ct)
     {
-        _capabilities = capabilities;
-    }
+        var values = new string[MaxItems];
 
-    public async Task ReadAllAsync(SendSectionRead send, CancellationToken ct)
-    {
-        _values = new string[_capabilities.MaxZones];
-        const int batchSize = 4;
-
-        for (int start = 1; start <= _capabilities.MaxZones; start += batchSize)
+        for (int start = 1; start <= MaxItems; start += BatchSize)
         {
-            int count = Math.Min(batchSize, _capabilities.MaxZones - start + 1);
-            var response = await send(new SectionRead { SectionAddress = [0, 1, (ushort)start], Count = (byte)count }, ct);
+            int count = Math.Min(BatchSize, MaxItems - start + 1);
+            var response = await send(
+                new SectionRead { SectionAddress = GetItemAddress(start), Count = (byte)count }, ct);
+
             if (response?.SectionData is not null)
             {
                 int labelSize = response.SectionData.Length / count;
                 for (int i = 0; i < count && i * labelSize < response.SectionData.Length; i++)
-                    _values[start - 1 + i] = Encoding.BigEndianUnicode.GetString(response.SectionData, i * labelSize, labelSize).TrimEnd();
+                    values[start - 1 + i] = Encoding.BigEndianUnicode
+                        .GetString(response.SectionData, i * labelSize, labelSize).TrimEnd();
             }
         }
+
+        Import(SerializeAll(values));
     }
 
-    public async Task ReadAsync(SendSectionRead send, int zone, CancellationToken ct)
+    public override async Task<SectionResult> WriteAsync(
+        SendSectionWrite send, int item, string value, CancellationToken ct)
     {
-        var response = await send(new SectionRead { SectionAddress = [0, 1, (ushort)zone] }, ct);
-        if (response?.SectionData is { Length: >= 2 })
-            _values[zone - 1] = Encoding.BigEndianUnicode.GetString(response.SectionData).TrimEnd();
-    }
-    public async Task<SectionResult> WriteAsync(SendSectionWrite send, int zone, string label, CancellationToken ct)
-    {
-        string paddedLabel = label.PadRight(28)[..28];
-        byte[] data = Encoding.BigEndianUnicode.GetBytes(paddedLabel);
-        var result = await send(new SectionWrite { SectionAddress = [0, 1, (ushort)zone], SectionData = data }, ct);
+        string padded = (value ?? "").PadRight(CharsPerLabel)[..CharsPerLabel];
+        byte[] data = Encoding.BigEndianUnicode.GetBytes(padded);
+        var result = await send(
+            new SectionWrite { SectionAddress = GetItemAddress(item), SectionData = data }, ct);
+
         if (result.Success)
-            _values[zone - 1] = label.TrimEnd();
+            this[item] = value?.TrimEnd() ?? "";
+
         return result;
     }
+
+    /// <summary>Snapshot of zones with labels (filters out null/empty), 1-indexed.</summary>
+    public override IReadOnlyList<(int Number, string Value)> Items =>
+        base.Items.Where(e => !string.IsNullOrEmpty(e.Value)).ToList();
 }

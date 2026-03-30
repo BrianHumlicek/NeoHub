@@ -1,61 +1,37 @@
-using DSC.TLink.ITv2.Messages;
-
 namespace NeoHub.Services.PanelConfiguration.Sections;
 
 /// <summary>
 /// Zone attribute flags from installer programming section [002].
 /// Address: [002][zone] — two bytes per zone (big-endian ushort).
 /// </summary>
-public class ZoneAttributeSection
+public class ZoneAttributeSection(PanelCapabilities capabilities)
+    : SectionGroup<ZoneAttributes>(capabilities)
 {
-    private readonly PanelCapabilities _capabilities;
-    private ZoneAttributes[] _values = [];
+    public override string DisplayName => "Zone Attributes";
+    public override int MaxItems => Capabilities.MaxZones;
 
-    public IReadOnlyList<ZoneAttributes> Values => _values;
+    protected override ushort[] GetItemAddress(int item) => [2, (ushort)item];
 
-    /// <summary>Snapshot of zones with attributes set (filters out zero), 1-indexed.</summary>
-    public IReadOnlyList<(int Number, ZoneAttributes Value)> Items
+    protected override ZoneAttributes[] DeserializeAll(byte[] data, int count)
     {
-        get
-        {
-            var values = _values;
-            return values
-                .Select((v, i) => (Number: i + 1, Value: v))
-                .ToList();
-        }
-    }
-
-    public ZoneAttributeSection(PanelCapabilities capabilities)
-    {
-        _capabilities = capabilities;
-    }
-
-    public async Task ReadAllAsync(SendSectionRead send, CancellationToken ct)
-    {
-        _values = new ZoneAttributes[_capabilities.MaxZones];
-
-        var response = await send(new SectionRead { SectionAddress = [2, 1], Count = (byte)_capabilities.MaxZones }, ct);
-        if (response?.SectionData is not null)
-        {
-            int elementCount = Math.Min(response.SectionData.Length / 2, _values.Length);
-            for (int i = 0; i < elementCount; i++)
-                _values[i] = new ZoneAttributes((ZoneFunctionalAttributes)response.SectionData[i * 2], (ZonePhysicalAttributes)response.SectionData[i * 2 + 1]);
-        }
-    }
-
-    public async Task ReadAsync(SendSectionRead send, int zone, CancellationToken ct)
-    {
-        var response = await send(new SectionRead { SectionAddress = [2, (ushort)zone] }, ct);
-        if (response?.SectionData is { Length: >= 2 })
-            _values[zone - 1] = new ZoneAttributes((ZoneFunctionalAttributes)response.SectionData[0], (ZonePhysicalAttributes)response.SectionData[1]);
-    }
-
-    public async Task<SectionResult> WriteAsync(SendSectionWrite send, int zone, ZoneAttributes attributes, CancellationToken ct)
-    {        
-        var result = await send(new SectionWrite { SectionAddress = [2, (ushort)zone], SectionData = [(byte)attributes.Functional, (byte)attributes.Physical] }, ct);
-        if (result.Success)
-            _values[zone - 1] = attributes;
+        var result = new ZoneAttributes[count];
+        int elementCount = Math.Min(data.Length / 2, count);
+        for (int i = 0; i < elementCount; i++)
+            result[i] = new ZoneAttributes(
+                (ZoneFunctionalAttributes)data[i * 2],
+                (ZonePhysicalAttributes)data[i * 2 + 1]);
         return result;
+    }
+
+    protected override byte[] SerializeAll(ZoneAttributes[] values)
+    {
+        var data = new byte[values.Length * 2];
+        for (int i = 0; i < values.Length; i++)
+        {
+            data[i * 2] = (byte)values[i].Functional;
+            data[i * 2 + 1] = (byte)values[i].Physical;
+        }
+        return data;
     }
 }
 
