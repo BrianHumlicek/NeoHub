@@ -221,7 +221,7 @@ Program the following tags in section **[851]** for your chosen integration slot
   - `[851][651]` Panel Integration ID
   - `[851][652]` Access code (12345678) *default*
   - `[851][664]` keep only option 3 on
-  - `[851][651]` NeoHub server address
+  - `[851][693]` NeoHub server address
   - `[851][697]` Clear DNS name (Optional)
   - `[851][999]` 55 (restart)
 
