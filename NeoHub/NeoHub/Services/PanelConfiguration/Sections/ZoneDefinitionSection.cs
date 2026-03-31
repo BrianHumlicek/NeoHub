@@ -23,6 +23,17 @@ public class ZoneDefinitionSection(PanelCapabilities capabilities)
     protected override byte[] SerializeAll(ZoneDefinition[] values)
         => values.Select(v => (byte)v).ToArray();
 
+    public override string FormatItemValue(int item)
+    {
+        var def = this[item];
+        if (def == ZoneDefinition.NullZone)
+            return "";
+
+        var raw = (byte)def;
+        var bits = Convert.ToString(raw, 2).PadLeft(8, '0');
+        return $"{raw:X2} [{bits[..4]} {bits[4..]}] {def}";
+    }
+
     /// <summary>Snapshot of configured zones (filters out NullZone), 1-indexed.</summary>
     public override IReadOnlyList<(int Number, ZoneDefinition Value)> Items =>
         base.Items.Where(e => e.Value != ZoneDefinition.NullZone).ToList();

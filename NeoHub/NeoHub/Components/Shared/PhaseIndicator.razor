@@ -1,0 +1,45 @@
+@* Reusable phase/progress indicator with icon-or-spinner and animated sweep effect. *@
+
+@if (IsAnimated)
+{
+    <span class="phase-indicator phase-indicator--active" style="@SweepStyle">
+        <MudProgressCircular Color="@Color" Size="@IconSize" Indeterminate="true" />
+        @if (!string.IsNullOrEmpty(Label))
+        {
+            <MudChip T="string" Size="Size.Small" Color="@Color" Variant="Variant.Filled">@Label</MudChip>
+        }
+    </span>
+}
+else
+{
+    <span class="phase-indicator">
+        <MudIcon Icon="@Icon" Color="@Color" Size="@IconSize" />
+        @if (!string.IsNullOrEmpty(Label))
+        {
+            <MudChip T="string" Size="Size.Small" Color="@Color" Variant="Variant.Outlined">@Label</MudChip>
+        }
+    </span>
+}
+
+@code {
+    [Parameter] public Color Color { get; set; } = Color.Default;
+    [Parameter] public string Icon { get; set; } = Icons.Material.Filled.Circle;
+    [Parameter] public string? Label { get; set; }
+    [Parameter] public bool IsAnimated { get; set; }
+    [Parameter] public Size IconSize { get; set; } = Size.Small;
+
+    /// <summary>Optional CSS color for the sweep gradient. Defaults to the MudBlazor theme color.</summary>
+    [Parameter] public string? SweepColor { get; set; }
+
+    private string SweepStyle => SweepColor is not null
+        ? $"--sweep-color: {SweepColor};"
+        : Color switch
+        {
+            Color.Info => "--sweep-color: var(--mud-palette-info);",
+            Color.Success => "--sweep-color: var(--mud-palette-success);",
+            Color.Warning => "--sweep-color: var(--mud-palette-warning);",
+            Color.Error => "--sweep-color: var(--mud-palette-error);",
+            Color.Primary => "--sweep-color: var(--mud-palette-primary);",
+            _ => "--sweep-color: var(--mud-palette-info);"
+        };
+}

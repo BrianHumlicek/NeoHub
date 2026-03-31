@@ -15,6 +15,7 @@ public class ZoneAssignmentSection : IConfigSection
 
     public string DisplayName => "Zone Assignment";
     public bool IsSupported => true;
+    public int MaxItems => _capabilities.MaxPartitions;
 
     /// <summary>
     /// Raw assignment matrix. _assignments[partitionIndex, zoneIndex] where both are 0-indexed.
@@ -175,6 +176,47 @@ public class ZoneAssignmentSection : IConfigSection
                 Buffer.BlockCopy(data, offset, partitionData, 0, bytesPerPartition);
             DecodeBitmap(partitionData, p, maxZones);
         }
+    }
+
+    /// <summary>Exports a single partition's assignment bitmap (1-indexed).</summary>
+    public byte[] ExportItem(int item) => EncodeBitmap(item - 1, _capabilities.MaxZones);
+
+    /// <summary>Imports a single partition's assignment bitmap (1-indexed).</summary>
+    public void ImportItem(int item, byte[] data)
+    {
+        if (_assignments.GetLength(0) == 0)
+            _assignments = new bool[_capabilities.MaxPartitions, _capabilities.MaxZones];
+        DecodeBitmap(data, item - 1, _capabilities.MaxZones);
+    }
+
+    /// <summary>Returns a human-readable list of assigned zone numbers for a partition (1-indexed),
+    /// preceded by the raw bitmap bytes shown as nibble-grouped bitfields.</summary>
+    public string FormatItemValue(int item)
+    {
+        var bitmap = EncodeBitmap(item - 1, _capabilities.MaxZones);
+        var bitmapStr = string.Join(" ", bitmap.Select(b =>
+        {
+            var bits = Convert.ToString(b, 2).PadLeft(8, '0');
+            return $"{b:X2}[{bits[..4]} {bits[4..]}]";
+        }));
+
+        var zones = new List<int>();
+        for (int z = 0; z < _capabilities.MaxZones; z++)
+            if (item - 1 < _assignments.GetLength(0) && _assignments[item - 1, z])
+                zones.Add(z + 1);
+
+        var zoneStr = zones.Count > 0 ? string.Join(", ", zones) : "(none)";
+        return $"{bitmapStr} → Zones: {zoneStr}";
+    }
+
+    /// <summary>Writes the current in-memory assignment for a single partition to the panel (1-indexed).</summary>
+    public async Task<SectionResult> WriteItemAsync(SendSectionWrite send, int item, CancellationToken ct)
+    {
+        int maxZones = _capabilities.MaxZones;
+        var zones = new bool[maxZones];
+        for (int z = 0; z < maxZones; z++)
+            zones[z] = _assignments[item - 1, z];
+        return await WriteAsync(send, item, zones, ct);
     }
 
     private void DecodeBitmap(byte[] data, int partitionIndex, int maxZones)

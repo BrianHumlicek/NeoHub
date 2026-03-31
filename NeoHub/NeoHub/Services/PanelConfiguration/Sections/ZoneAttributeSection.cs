@@ -33,6 +33,32 @@ public class ZoneAttributeSection(PanelCapabilities capabilities)
         }
         return data;
     }
+
+    public override string FormatItemValue(int item)
+    {
+        var attrs = this[item];
+        if ((byte)attrs.Functional == 0 && (byte)attrs.Physical == 0)
+            return "";
+
+        return $"F:{FormatByte((byte)attrs.Functional, attrs.Functional)} | P:{FormatByte((byte)attrs.Physical, attrs.Physical)}";
+    }
+
+    private static string FormatByte<TEnum>(byte raw, TEnum value) where TEnum : struct, Enum
+    {
+        var bits = Convert.ToString(raw, 2).PadLeft(8, '0');
+        var flags = FormatFlags(value);
+        return $"{raw:X2} [{bits[..4]} {bits[4..]}]{(flags.Length > 0 ? $" ({flags})" : "")}";
+    }
+
+    private static string FormatFlags<TEnum>(TEnum value) where TEnum : struct, Enum
+    {
+        var names = Enum.GetValues<TEnum>()
+            .Where(f => Convert.ToByte(f) != 0
+                     && (Convert.ToByte(f) & (Convert.ToByte(f) - 1)) == 0
+                     && value.HasFlag(f))
+            .Select(f => f.ToString().Replace("Is", ""));
+        return string.Join(", ", names);
+    }
 }
 
 public readonly record struct ZoneAttributes(ZoneFunctionalAttributes Functional, ZonePhysicalAttributes Physical);

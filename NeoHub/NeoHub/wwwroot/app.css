@@ -100,3 +100,39 @@ h1:focus {
         transform: scale(1.05);
     }
 }
+
+/* ── PhaseIndicator component ── */
+.phase-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    position: relative;
+    border-radius: 4px;
+    padding: 2px 4px;
+}
+
+.phase-indicator--active {
+    overflow: hidden;
+}
+
+.phase-indicator--active::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(
+        90deg,
+        transparent 0%,
+        color-mix(in srgb, var(--sweep-color, var(--mud-palette-info)) 18%, transparent) 40%,
+        color-mix(in srgb, var(--sweep-color, var(--mud-palette-info)) 30%, transparent) 50%,
+        color-mix(in srgb, var(--sweep-color, var(--mud-palette-info)) 18%, transparent) 60%,
+        transparent 100%
+    );
+    animation: phase-sweep 2s ease-in-out infinite;
+    pointer-events: none;
+}
+
+@keyframes phase-sweep {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}

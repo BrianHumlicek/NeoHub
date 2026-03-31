@@ -22,6 +22,14 @@ public class PartitionEnableSection(PanelCapabilities capabilities)
 
     protected override byte[] SerializeAll(PartitionEnable[] values)
         => values.Select(v => (byte)v).ToArray();
+
+    public override string FormatItemValue(int item)
+    {
+        var value = this[item];
+        var raw = (byte)value;
+        var bits = Convert.ToString(raw, 2).PadLeft(8, '0');
+        return $"{raw:X2} [{bits[..4]} {bits[4..]}] {value}";
+    }
 }
 
 public enum PartitionEnable : byte

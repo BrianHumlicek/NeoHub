@@ -1,0 +1,161 @@
+@using NeoHub.Services.PanelConfiguration
+@using NeoHub.Services.PanelConfiguration.Sections
+@inject IPanelConfigurationService ConfigService
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        @if (!Diffs.Any())
+        {
+            <MudAlert Severity="Severity.Info">No differences found — the file matches the current configuration.</MudAlert>
+        }
+        else
+        {
+            <MudText Typo="Typo.body2" Class="mb-3">
+                <strong>@Diffs.Count</strong> change@(Diffs.Count == 1 ? "" : "s") across
+                <strong>@Diffs.Select(d => d.SectionName).Distinct().Count()</strong> section@(Diffs.Select(d => d.SectionName).Distinct().Count() == 1 ? "" : "s")
+            </MudText>
+
+            @foreach (var group in Diffs.GroupBy(d => d.SectionName))
+            {
+                <MudText Typo="Typo.subtitle2" Class="mt-3 mb-1">@group.Key (@group.Count())</MudText>
+                <MudSimpleTable Dense="true" Hover="true" Style="max-height: 400px; overflow-y: auto;">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Address</th>
+                            <th>Current</th>
+                            <th></th>
+                            <th>New</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var diff in group)
+                        {
+                            <tr>
+                                <td>@diff.ItemNumber</td>
+                                <td><code>@diff.Address</code></td>
+                                <td style="color: var(--mud-palette-error);">@Truncate(diff.CurrentValue)</td>
+                                <td><MudIcon Icon="@Icons.Material.Filled.ArrowForward" Size="Size.Small" /></td>
+                                <td style="color: var(--mud-palette-success);">@Truncate(diff.NewValue)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            }
+        }
+
+        @if (_applyError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mt-3">@_applyError</MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton OnClick="PreviewOnly"
+                   Variant="Variant.Outlined"
+                   Color="Color.Info"
+                   Disabled="@(!Diffs.Any())">
+            Preview Only
+        </MudButton>
+        <MudButton OnClick="ApplyAsync"
+                   Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   Disabled="@(!Diffs.Any() || _applying)"
+                   Loading="@_applying">
+            Write @Diffs.Count Change@(Diffs.Count == 1 ? "" : "s") to Panel
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter] public IReadOnlyList<ConfigDiffEntry> Diffs { get; set; } = [];
+    [Parameter] public PanelConfigurationState CurrentConfig { get; set; } = null!;
+    [Parameter] public PanelConfigurationState IncomingConfig { get; set; } = null!;
+    [Parameter] public string SessionId { get; set; } = null!;
+    [Parameter] public string InstallerCode { get; set; } = null!;
+
+    private bool _applying;
+    private string? _applyError;
+
+    private void Cancel() => MudDialog.Cancel();
+
+    /// <summary>Closes with the incoming config but does NOT write to the panel.</summary>
+    private void PreviewOnly() => MudDialog.Close(DialogResult.Ok(false));
+
+    /// <summary>Writes only changed items to the panel, then closes.</summary>
+    private async Task ApplyAsync()
+    {
+        _applying = true;
+        _applyError = null;
+        StateHasChanged();
+
+        try
+        {
+            var result = await ConfigService.ExecuteInConfigModeAsync(
+                SessionId, InstallerCode, readWrite: true,
+                async () =>
+                {
+                    var send = ConfigService.CreateWriteDelegate(SessionId);
+                    int written = 0;
+                    int failed = 0;
+
+                    for (int s = 0; s < CurrentConfig.AllSections.Count; s++)
+                    {
+                        var curSection = CurrentConfig.AllSections[s];
+                        var newSection = IncomingConfig.AllSections[s];
+
+                        if (!curSection.IsSupported || curSection.DisplayName != newSection.DisplayName)
+                            continue;
+
+                        for (int i = 1; i <= Math.Min(curSection.MaxItems, newSection.MaxItems); i++)
+                        {
+                            var curBytes = curSection.ExportItem(i);
+                            var newBytes = newSection.ExportItem(i);
+
+                            if (curBytes.AsSpan().SequenceEqual(newBytes))
+                                continue;
+
+                            curSection.ImportItem(i, newBytes);
+                            var writeResult = await curSection.WriteItemAsync(send, i, CancellationToken.None);
+
+                            if (writeResult.Success)
+                                written++;
+                            else
+                                failed++;
+                        }
+                    }
+
+                    return failed > 0
+                        ? new SectionResult(false, $"{written} written, {failed} failed")
+                        : new SectionResult(true);
+                },
+                CancellationToken.None);
+
+            if (result.Success)
+            {
+                Snackbar.Add($"Applied {Diffs.Count} changes to panel", Severity.Success);
+                MudDialog.Close(DialogResult.Ok(true));
+            }
+            else
+            {
+                _applyError = $"Write completed with errors: {result.ErrorMessage}";
+            }
+        }
+        catch (Exception ex)
+        {
+            _applyError = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            _applying = false;
+            StateHasChanged();
+        }
+    }
+
+    private static string Truncate(string value, int max = 60)
+        => value.Length <= max ? value : value[..(max - 1)] + "…";
+}

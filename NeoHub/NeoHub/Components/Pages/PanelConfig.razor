@@ -8,8 +8,10 @@
 @using Microsoft.Extensions.Options
 @inject IPanelStateService PanelState
 @inject IPanelConfigurationService ConfigService
+@inject IPanelConfigFileService ConfigFileService
 @inject IITv2SessionManager SessionManager
 @inject ISessionMonitor SessionMonitor
+@inject IJSRuntime JS
 @inject IOptionsMonitor<ApplicationSettings> AppSettings
 @inject IDialogService DialogService
 @inject NavigationManager Navigation
@@ -56,21 +58,57 @@
                     </div>
                 </MudStack>
                 <MudStack Row="true" Spacing="2">
-                    <MudButton Variant="Variant.Outlined"
-                               StartIcon="@Icons.Material.Filled.Download"
+                    <MudButton Variant="@(_isReading ? Variant.Filled : Variant.Outlined)"
+                               Color="@(_isReading ? Color.Info : Color.Default)"
                                OnClick="ReadAllAsync"
                                Disabled="@_isReading"
-                               Loading="@_isReading">
-                        Load
+                               Style="position: relative; overflow: hidden;">
+                        <PhaseIndicator IsAnimated="@_isReading"
+                                        Color="@(_isReading ? Color.Info : Color.Default)"
+                                        Icon="@Icons.Material.Filled.Download"
+                                        Label="@(_isReading ? "Reading…" : "Read Panel")" />
                     </MudButton>
-                    <MudButton Variant="Variant.Outlined"
-                               StartIcon="@Icons.Material.Filled.Save"
-                               Disabled="true">
-                        Save
-                    </MudButton>
+                    <MudMenu Label="Save" StartIcon="@Icons.Material.Filled.Save"
+                             Variant="Variant.Outlined" AnchorOrigin="Origin.BottomRight">
+                        <MudMenuItem Icon="@Icons.Material.Filled.Computer"
+                                     OnClick="SaveToServerAsync">
+                            Save to Server
+                        </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.FileDownload"
+                                     OnClick="DownloadToBrowserAsync">
+                            Export File
+                        </MudMenuItem>
+                    </MudMenu>
+                    <MudMenu Label="Load" StartIcon="@Icons.Material.Filled.FolderOpen"
+                             Variant="Variant.Outlined" AnchorOrigin="Origin.BottomRight">
+                        @{
+                            var savedFiles = ConfigFileService.GetSavedFiles();
+                        }
+                        @if (savedFiles.Any())
+                        {
+                            @foreach (var file in savedFiles)
+                            {
+                                var f = file;
+                                <MudMenuItem Icon="@Icons.Material.Filled.Description"
+                                             OnClick="@(() => LoadFromServerAsync(f))">
+                                    @f
+                                </MudMenuItem>
+                            }
+                            <MudDivider />
+                        }
+                        <MudMenuItem Icon="@Icons.Material.Filled.UploadFile">
+                            <MudFileUpload T="IBrowserFile" Accept=".json"
+                                           FilesChanged="UploadFromBrowserAsync"
+                                           Style="display:inline;">
+                                <ActivatorContent>
+                                    <MudText>Upload from Browser</MudText>
+                                </ActivatorContent>
+                            </MudFileUpload>
+                        </MudMenuItem>
+                    </MudMenu>
                     <MudButton Variant="Variant.Outlined"
                                StartIcon="@Icons.Material.Filled.Print"
-                               Disabled="true">
+                               OnClick="PrintConfigAsync">
                         Print
                     </MudButton>
                 </MudStack>
@@ -488,5 +526,137 @@
         _disposed = true;
         SessionMonitor.SessionsChanged -= OnSessionsChanged;
         PanelState.SessionStateChanged -= OnStateChanged;
+    }
+
+    private async Task SaveToServerAsync()
+    {
+        if (_config is null) return;
+
+        try
+        {
+            var fileName = $"panel-config-{_sessionId}-{DateTime.Now:yyyyMMdd-HHmmss}.json";
+            await ConfigFileService.SaveToServerAsync(_config, fileName);
+            Snackbar.Add($"Saved to server: {fileName}", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Save failed: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task DownloadToBrowserAsync()
+    {
+        if (_config is null) return;
+
+        try
+        {
+            var bytes = ConfigFileService.ExportToBytes(_config);
+            var base64 = Convert.ToBase64String(bytes);
+            var fileName = $"panel-config-{_sessionId}-{DateTime.Now:yyyyMMdd-HHmmss}.json";
+            await JS.InvokeVoidAsync("downloadFile", fileName, base64, "application/json");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Download failed: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task PrintConfigAsync()
+    {
+        if (_config is null) return;
+
+        try
+        {
+            var html = ConfigFileService.GeneratePrintHtml(_config, _sessionId);
+            await JS.InvokeVoidAsync("printHtml", html);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Print failed: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task LoadFromServerAsync(string fileName)
+    {
+        try
+        {
+            var incoming = await ConfigFileService.LoadFromServerAsync(fileName);
+            await ShowDiffDialogAsync(incoming, fileName);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Load failed: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task UploadFromBrowserAsync(IBrowserFile? file)
+    {
+        if (file is null) return;
+
+        try
+        {
+            using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+
+            var incoming = ConfigFileService.ImportFromBytes(ms.ToArray());
+            await ShowDiffDialogAsync(incoming, file.Name);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Import failed: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task ShowDiffDialogAsync(PanelConfigurationState incoming, string sourceName)
+    {
+        if (_config is null || _sessionId is null)
+        {
+            // No current config to diff against — just apply directly
+            if (_sessionId is not null)
+                PanelState.UpdateSession(_sessionId, s => s.Configuration = incoming);
+            _session = _sessionId is not null ? PanelState.GetSession(_sessionId) : null;
+            _config = _session?.Configuration;
+            Snackbar.Add($"Loaded: {sourceName}", Severity.Success);
+            StateHasChanged();
+            return;
+        }
+
+        var diffs = ConfigFileService.Compare(_config, incoming);
+
+        var parameters = new DialogParameters<ConfigDiffDialog>
+        {
+            { x => x.Diffs, diffs },
+            { x => x.CurrentConfig, _config },
+            { x => x.IncomingConfig, incoming },
+            { x => x.SessionId, _sessionId },
+            { x => x.InstallerCode, _installerCode ?? "" }
+        };
+
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Medium,
+            FullWidth = true,
+            CloseButton = true
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfigDiffDialog>(
+            $"Configuration Diff — {sourceName}", parameters, options);
+        var result = await dialog.Result;
+
+        if (result?.Canceled != false) return;
+
+        // result.Data is true if changes were written, false if preview-only
+        var wasWritten = result.Data is true;
+
+        if (!wasWritten)
+        {
+            // Preview only — swap in-memory config without writing to panel
+            PanelState.UpdateSession(_sessionId, s => s.Configuration = incoming);
+        }
+
+        _session = PanelState.GetSession(_sessionId);
+        _config = _session?.Configuration;
+        StateHasChanged();
     }
 }

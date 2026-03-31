@@ -41,14 +41,9 @@
                     var phaseInfo = GetPhaseInfo(phase, isConnected);
                 }
                 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
-                    @if (phaseInfo.IsAnimated)
-                    {
-                        <MudProgressCircular Color="@phaseInfo.Color" Size="Size.Small" Indeterminate="true" />
-                    }
-                    else
-                    {
-                        <MudIcon Icon="@phaseInfo.Icon" Color="@phaseInfo.Color" Size="Size.Small" />
-                    }
+                    <PhaseIndicator IsAnimated="@phaseInfo.IsAnimated"
+                                    Color="@phaseInfo.Color"
+                                    Icon="@phaseInfo.Icon" />
                     <MudText Typo="Typo.h6">@sessionId</MudText>
                     <MudChip T="string" Size="Size.Small" Color="@phaseInfo.Color"
                              Variant="@(phaseInfo.IsAnimated ? Variant.Filled : Variant.Outlined)">

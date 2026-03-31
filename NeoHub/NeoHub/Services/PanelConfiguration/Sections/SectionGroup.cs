@@ -5,15 +5,21 @@ namespace NeoHub.Services.PanelConfiguration.Sections;
 /// <summary>
 /// Non-generic interface shared by all configuration sections (both <see cref="SectionGroup{T}"/>
 /// and standalone sections like <see cref="ZoneAssignmentSection"/>). Enables generic iteration
-/// for reading, exporting, importing, and UI enumeration.
+/// for reading, exporting, importing, diffing, and UI enumeration.
 /// </summary>
 public interface IConfigSection
 {
     string DisplayName { get; }
     bool IsSupported { get; }
+    int MaxItems { get; }
+    string FormatAddress(int item);
+    string FormatItemValue(int item);
     Task ReadAllAsync(SendSectionRead send, CancellationToken ct);
+    Task<SectionResult> WriteItemAsync(SendSectionWrite send, int item, CancellationToken ct);
     byte[] Export();
     void Import(byte[] data);
+    byte[] ExportItem(int item);
+    void ImportItem(int item, byte[] data);
 }
 
 /// <summary>
@@ -145,6 +151,25 @@ public abstract class SectionGroup<T> : IConfigSection
 
     /// <summary>Imports values from a raw byte buffer (file load).</summary>
     public void Import(byte[] data) => _values = DeserializeAll(data, MaxItems);
+
+    /// <summary>Exports a single item's bytes (1-indexed).</summary>
+    public byte[] ExportItem(int item) => SerializeAll([this[item]]);
+
+    /// <summary>Imports a single item from bytes (1-indexed).</summary>
+    public void ImportItem(int item, byte[] data)
+    {
+        EnsureCapacity();
+        var parsed = DeserializeAll(data, 1);
+        if (parsed.Length > 0)
+            _values[item - 1] = parsed[0];
+    }
+
+    /// <summary>Returns a human-readable string for the item value at a 1-indexed position.</summary>
+    public virtual string FormatItemValue(int item) => this[item]?.ToString() ?? "";
+
+    /// <summary>Writes the current in-memory value for a single item to the panel (1-indexed).</summary>
+    public Task<SectionResult> WriteItemAsync(SendSectionWrite send, int item, CancellationToken ct)
+        => WriteAsync(send, item, this[item], ct);
 
     private void EnsureCapacity()
     {

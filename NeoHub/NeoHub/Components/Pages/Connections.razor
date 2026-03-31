@@ -43,16 +43,9 @@
                 <MudCard Elevation="2" Outlined="true">
                     <MudCardHeader>
                         <CardHeaderAvatar>
-                            @if (isInitializing)
-                            {
-                                <MudProgressCircular Color="@status.Color" Size="Size.Small" Indeterminate="true" />
-                            }
-                            else
-                            {
-                                <MudAvatar Color="@status.Color" Size="Size.Small">
-                                    <MudIcon Icon="@status.Icon" Size="Size.Small" />
-                                </MudAvatar>
-                            }
+                            <PhaseIndicator IsAnimated="@isInitializing"
+                                            Color="@status.Color"
+                                            Icon="@status.Icon" />
                         </CardHeaderAvatar>
                         <CardHeaderContent>
                             <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
