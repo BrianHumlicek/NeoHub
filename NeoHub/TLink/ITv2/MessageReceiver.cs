@@ -62,6 +62,21 @@ internal sealed class MessageReceiver : IMessageReceiver
 
     public bool TryReceive(ITv2Packet packet)
     {
+        if (packet.Message is CommandError globalError && globalError.NackCommand == _senderCommandType)
+        {
+            _tcs.TrySetResult(packet.Message);
+            return true;
+        }
+
+        // Some panel commands ACK on the original transaction and then deliver
+        // the actual response as a new inbound transaction (different receiver sequence).
+        // Accept command-type response globally by command id.
+        if (_commandSequence is not null && packet.Message is not SimpleAck && packet.Message.Command == _receiveCommandType)
+        {
+            _tcs.TrySetResult(packet.Message);
+            return true;
+        }
+
         if (packet.ReceiverSequence == _senderSequence)
         {
             if (packet.Message is CommandError errorMessage && errorMessage.NackCommand == _senderCommandType)
@@ -92,6 +107,23 @@ internal sealed class MessageReceiver : IMessageReceiver
 
     public bool TryReceiveSubMessage(IMessageData message)
     {
+        if (_commandSequence is not null)
+        {
+            if (message is CommandError error && error.NackCommand == _senderCommandType)
+            {
+                _tcs.TrySetResult(error);
+                return true;
+            }
+
+            // Async command responses can arrive as non-ICommandMessage payloads
+            // embedded inside MultipleMessagePacket. Match by response command id.
+            if (message.Command == _receiveCommandType)
+            {
+                _tcs.TrySetResult(message);
+                return true;
+            }
+        }
+
         if (_commandSequence is not null && message is ICommandMessage cmd && cmd.CommandSequence == _commandSequence)
         {
             _tcs.TrySetResult(cmd);

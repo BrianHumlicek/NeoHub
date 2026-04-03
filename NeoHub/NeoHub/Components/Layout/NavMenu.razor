@@ -23,6 +23,10 @@
         </div>
 
         <div class="nav-item px-3">
+            <MudNavLink Href="access-codes" Icon="@Icons.Material.Filled.Badge">Access Codes</MudNavLink>
+        </div>
+
+        <div class="nav-item px-3">
             <MudNavLink Href="settings" Icon="@Icons.Material.Filled.Settings">Settings</MudNavLink>
         </div>
 
@@ -35,8 +39,8 @@
         </div>
     </nav>
     <div class="nav-version" onclick="event.stopPropagation()">
-        <div>GitHub @GithubShortHash · Build @BuildInfo.BuildNumber</div>
-        <div>@BuildInfo.BuildTimeUtc.ToString("yyyy-MM-dd HH:mm") UTC · @BuildAge</div>
+        <div>GitHub @GithubShortHash Â· Build @BuildInfo.BuildNumber</div>
+        <div>@BuildInfo.BuildTimeUtc.ToString("yyyy-MM-dd HH:mm") UTC Â· @BuildAge</div>
     </div>
 </div>
 
@@ -57,5 +61,3 @@
         }
     }
 }
-
-

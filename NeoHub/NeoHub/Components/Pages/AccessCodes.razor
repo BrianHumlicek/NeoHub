@@ -1,0 +1,179 @@
+@page "/access-codes"
+@using NeoHub.Services
+@using NeoHub.Services.Models
+@using DSC.TLink.ITv2.MediatR
+@inject IPanelAccessCodeService AccessCodeService
+@inject IPanelStateService PanelState
+@inject IITv2SessionManager SessionManager
+@inject ISessionMonitor SessionMonitor
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+<PageTitle>Access Codes</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
+    <MudText Typo="Typo.h4" GutterBottom="true">Access Codes</MudText>
+
+    @if (_sessionId is null)
+    {
+        <MudAlert Severity="Severity.Warning">No active panel session.</MudAlert>
+    }
+    else
+    {
+        <MudPaper Class="pa-4 mb-3">
+            <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+                <MudText Typo="Typo.subtitle1">Session: @_sessionId</MudText>
+                <MudSpacer />
+                <MudSwitch T="bool" Label="Show full codes" @bind-Value="_revealCodes" />
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           OnClick="ReadAccessCodesAsync"
+                           Disabled="@_reading"
+                           StartIcon="@Icons.Material.Filled.Download">
+                    @(_reading ? "Reading..." : "Read Access Codes")
+                </MudButton>
+            </MudStack>
+
+            @if (_lastResult is not null)
+            {
+                <MudAlert Severity="@(_lastResult.Success ? Severity.Success : Severity.Error)" Dense="true" Class="mt-3">
+                    @if (_lastResult.Success)
+                    {
+                        <span>Read completed: @_lastResult.ReadCount OK, @_lastResult.FailedCount failed.</span>
+                    }
+                    else
+                    {
+                        <span>Read failed: @_lastResult.ErrorMessage</span>
+                    }
+                </MudAlert>
+            }
+        </MudPaper>
+
+        @if (_session?.AccessCodes.Any() == true)
+        {
+            <MudPaper Class="pa-2">
+                <MudSimpleTable Dense="true" Hover="true" FixedHeader="true" Style="max-height: 70vh;">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Label</th>
+                            <th>Code</th>
+                            <th>Length</th>
+                            <th>Proximity Tag</th>
+                            <th>Partitions</th>
+                            <th>Updated</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in _session.AccessCodes.Values.OrderBy(x => x.UserIndex))
+                        {
+                            <tr style="@(item.IsActive ? "" : "opacity: 0.5;")">
+                                <td>@item.UserIndex</td>
+                                <td>@(string.IsNullOrWhiteSpace(item.Label) ? "-" : item.Label)</td>
+                                <td style="font-family: monospace;">@FormatCode(item)</td>
+                                <td>@(item.CodeLength?.ToString() ?? "-")</td>
+                                <td>@(item.HasProximityTag ? "Yes" : "-")</td>
+                                <td>@(item.Partitions.Count == 0 ? "-" : string.Join(",", item.Partitions))</td>
+                                <td>@item.LastUpdated.ToLocalTime().ToString("HH:mm:ss")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            </MudPaper>
+        }
+        else
+        {
+            <MudAlert Severity="Severity.Info">No access codes loaded yet.</MudAlert>
+        }
+    }
+</MudContainer>
+
+@code {
+    private string? _sessionId;
+    private SessionState? _session;
+    private bool _reading;
+    private bool _revealCodes;
+    private AccessCodeReadResult? _lastResult;
+    private bool _disposed;
+
+    protected override void OnInitialized()
+    {
+        RefreshSession();
+        SessionMonitor.SessionsChanged += OnSessionsChanged;
+        PanelState.SessionStateChanged += OnSessionStateChanged;
+    }
+
+    private void OnSessionsChanged()
+    {
+        InvokeAsync(() =>
+        {
+            if (_disposed) return;
+            RefreshSession();
+            StateHasChanged();
+        });
+    }
+
+    private void OnSessionStateChanged(object? sender, SessionStateChangedEventArgs e)
+    {
+        if (_sessionId == null || !string.Equals(_sessionId, e.SessionId, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        InvokeAsync(() =>
+        {
+            if (_disposed) return;
+            _session = PanelState.GetSession(_sessionId);
+            StateHasChanged();
+        });
+    }
+
+    private void RefreshSession()
+    {
+        var active = SessionManager.GetActiveSessions().ToList();
+        if (_sessionId == null || !active.Contains(_sessionId))
+            _sessionId = active.FirstOrDefault();
+
+        _session = _sessionId is null ? null : PanelState.GetSession(_sessionId);
+    }
+
+    private async Task ReadAccessCodesAsync()
+    {
+        if (_sessionId is null)
+            return;
+
+        _reading = true;
+        _lastResult = null;
+        StateHasChanged();
+
+        try
+        {
+            _lastResult = await AccessCodeService.ReadAllAsync(_sessionId, CancellationToken.None);
+            _session = PanelState.GetSession(_sessionId);
+
+            if (_lastResult.Success)
+                Snackbar.Add("Access codes read finished", Severity.Success);
+            else
+                Snackbar.Add($"Access code read failed: {_lastResult.ErrorMessage}", Severity.Error);
+        }
+        finally
+        {
+            _reading = false;
+            StateHasChanged();
+        }
+    }
+
+    private string FormatCode(AccessCodeState code)
+    {
+        if (string.IsNullOrEmpty(code.CodeValue))
+            return "-";
+        if (_revealCodes)
+            return code.CodeValue;
+        return new string('*', Math.Max(4, code.CodeValue.Length));
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        SessionMonitor.SessionsChanged -= OnSessionsChanged;
+        PanelState.SessionStateChanged -= OnSessionStateChanged;
+    }
+}

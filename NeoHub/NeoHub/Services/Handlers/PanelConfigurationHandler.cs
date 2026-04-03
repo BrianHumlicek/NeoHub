@@ -70,13 +70,14 @@ namespace NeoHub.Services.Handlers
                 }
 
                 _logger.LogInformation(
-                    "Panel capabilities: {MaxZones} zones, {MaxPartitions} partitions",
-                    capabilities.MaxZones, capabilities.MaxPartitions);
+                    "Panel capabilities: {MaxZones} zones, {MaxPartitions} partitions, {MaxUsers} users",
+                    capabilities.MaxZones, capabilities.MaxPartitions, capabilities.MaxUsers);
 
                 _panelState.UpdateSession(sessionId, s =>
                 {
                     s.MaxZones = capabilities.MaxZones;
                     s.MaxPartitions = capabilities.MaxPartitions;
+                    s.MaxUsers = capabilities.MaxUsers;
                 });
 
                 var connectionSettings = _connectionSettings.CurrentValue.Connections
