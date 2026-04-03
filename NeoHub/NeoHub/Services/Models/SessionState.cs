@@ -12,8 +12,11 @@ namespace NeoHub.Services.Models
         public ConnectionPhase ConnectionPhase { get; set; }
         public int MaxZones { get; set; }
         public int MaxPartitions { get; set; }
+        public int MaxUsers { get; set; }
         public Dictionary<byte, PartitionState> Partitions { get; } = new();
         public Dictionary<byte, ZoneState> Zones { get; } = new();
+        public Dictionary<int, AccessCodeState> AccessCodes { get; } = new();
+        public DateTime? AccessCodesLastReadAt { get; set; }
 
         /// <summary>
         /// Installer configuration data read via SectionRead.

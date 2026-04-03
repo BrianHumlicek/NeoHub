@@ -303,11 +303,23 @@ namespace DSC.TLink.Serialization
 
         private static TypePlan BuildPlan(Type type)
         {
+            int GetInheritanceDepth(Type? t)
+            {
+                int depth = 0;
+                while (t != null)
+                {
+                    depth++;
+                    t = t.BaseType;
+                }
+                return depth;
+            }
+
             var properties = type.GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
                 .Where(p => p.CanRead && p.CanWrite
                     && !p.IsDefined(typeof(IgnorePropertyAttribute), false)
                     && (p.GetMethod!.IsPublic || p.GetMethod.IsAssembly))
-                .OrderBy(p => p.MetadataToken)
+                .OrderBy(p => GetInheritanceDepth(p.DeclaringType))
+                .ThenBy(p => p.MetadataToken)
                 .ToArray();
 
             // Identify bit field groups
