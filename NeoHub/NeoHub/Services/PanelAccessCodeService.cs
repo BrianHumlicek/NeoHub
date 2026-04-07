@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using DSC.TLink.ITv2;
 using DSC.TLink.ITv2.Enumerations;
 using DSC.TLink.ITv2.MediatR;
@@ -16,10 +17,27 @@ namespace NeoHub.Services
         private readonly ILogger<PanelAccessCodeService> _logger;
 
         /// <summary>
-        /// How long to wait for the panel to confirm programming mode entry (0x0702 LeadIn)
-        /// after sending ConfigurationEnter (0x0704).
+        /// How long to wait for programming mode confirmation (LeadIn) after ConfigurationEnter.
         /// </summary>
         private static readonly TimeSpan ProgrammingModeTimeout = TimeSpan.FromSeconds(10);
+
+        /// <summary>
+        /// Number of users to read concurrently. Each user sends 4 commands in parallel,
+        /// so this value x 4 = max in-flight ITv2 commands. Keep at 1 to avoid
+        /// flooding the panel's command buffer.
+        /// </summary>
+        private const int MaxConcurrentUserReads = 1;
+
+        /// <summary>
+        /// Max labels to request per batch via NotificationLabelText.
+        /// </summary>
+        private const int MaxLabelsPerRequest = 4;
+
+        /// <summary>
+        /// NotificationLabelText type for user/access code labels.
+        /// Known types: 0xD1=zone, 0xD3=partition, 0xD9=user.
+        /// </summary>
+        private const int UserLabelTypeCode = 0xD9;
 
         public PanelAccessCodeService(
             IMediator mediator,
@@ -44,90 +62,151 @@ namespace NeoHub.Services
 
             _logger.LogInformation("Reading access codes for session {SessionId}, max users: {MaxUsers}", sessionId, session.MaxUsers);
 
-            // Access code commands (0x0736/37/38/3C) are sent as direct ITv2 commands in AccessCodeProgramming mode.
+            // Access code commands require AccessCodeProgramming mode with the master code.
             var masterCode = _appSettings.CurrentValue.DefaultAccessCode;
             if (string.IsNullOrWhiteSpace(masterCode))
                 return new AccessCodeReadResult(false, "Master code (DefaultAccessCode) not configured");
 
-            if (!await EnterAccessCodeModeAsync(sessionId, masterCode, ct))
-                return new AccessCodeReadResult(false, "Failed to enter programming mode");
+            session.IsReadingAccessCodes = true;
+            session.AccessCodeReadCurrent = 0;
+            session.AccessCodeReadTotal = session.MaxUsers;
+            session.AccessCodeReadProgress = null;
+            _panelState.UpdateSession(sessionId, _ => { });
 
             try
             {
-                return await ReadAllUsersAsync(sessionId, session, ct);
+                // 1. Read user labels first (no programming mode needed, uses CommandRequestMessage)
+                UpdateProgress(session, sessionId, "Reading user labels…");
+                var labels = await ReadUserLabelsAsync(sessionId, session.MaxUsers, ct);
+
+                // 2. Enter programming mode for access code commands
+                UpdateProgress(session, sessionId, "Entering programming mode…");
+                if (!await EnterAccessCodeModeAsync(sessionId, masterCode, ct))
+                    return new AccessCodeReadResult(false, "Failed to enter programming mode");
+
+                AccessCodeReadResult result;
+                try
+                {
+                    // 3. Read all users (4 commands per user in parallel)
+                    result = await ReadAllUsersAsync(sessionId, session, labels, ct);
+                }
+                finally
+                {
+                    await ExitConfigModeAsync(sessionId, ct);
+                }
+
+                return result;
             }
             finally
             {
-                await ExitConfigModeAsync(sessionId, ct);
+                session.IsReadingAccessCodes = false;
+                session.AccessCodeReadProgress = null;
+                session.AccessCodeReadCurrent = 0;
+                session.AccessCodeReadTotal = 0;
+                _panelState.UpdateSession(sessionId, _ => { });
             }
         }
 
-        private async Task<AccessCodeReadResult> ReadAllUsersAsync(
-            string sessionId, Models.SessionState session, CancellationToken ct)
+        // ── Progress reporting ────────────────────────────────────────────
+
+        private void UpdateProgress(Models.SessionState session, string sessionId, string message)
         {
-            var readCount = 0;
-            var failedCount = 0;
+            session.AccessCodeReadProgress = message;
+            _panelState.UpdateSession(sessionId, _ => { });
+        }
 
-            for (int userIndex = 1; userIndex <= session.MaxUsers; userIndex++)
+        // ── User labels (via NotificationLabelText) ─────────────────────
+
+        /// <summary>
+        /// Reads user labels from the panel. Called before entering programming mode.
+        /// Best-effort — returns empty dictionary on failure.
+        /// </summary>
+        private async Task<Dictionary<int, string>> ReadUserLabelsAsync(
+            string sessionId, int maxUsers, CancellationToken ct)
+        {
+            var labels = new Dictionary<int, string>();
+
+            try
             {
-                var state = session.AccessCodes.TryGetValue(userIndex, out var existing)
-                    ? existing
-                    : new Models.AccessCodeState { UserIndex = userIndex };
-
-                bool ok = true;
-
-                var accessCode = await SendRequestAsync<AccessCodeReadResponse>(
-                    sessionId,
-                    new AccessCodeReadRequest { UserNumberStart = userIndex, NumberOfUsers = 1 },
-                    ct);
-                if (accessCode == null)
+                for (int start = 1; start <= maxUsers; start += MaxLabelsPerRequest)
                 {
-                    ok = false;
-                }
-                else
-                {
-                    state.RawAccessCode = accessCode.Data;
-                    state.CodeValue = TryExtractCodeDigits(accessCode.Data);
-                    state.CodeLength = state.CodeValue?.Length;
-                }
+                    int end = Math.Min(start + MaxLabelsPerRequest - 1, maxUsers);
 
-                var attr = await SendRequestAsync<AccessCodeAttributeReadResponse>(
-                    sessionId,
-                    new AccessCodeAttributeReadRequest { UserNumberStart = userIndex, NumberOfUsers = 1 },
-                    ct);
-                if (attr != null)
-                {
-                    state.RawAttributes = attr.Data;
-                    state.IsActive = IsUserActive(attr.Data);
-                }
+                    var response = await SendRequestAsync<NotificationLabelText>(
+                        sessionId,
+                        new CommandRequestMessage
+                        {
+                            Request = new NotificationLabelText
+                            {
+                                Unknown = UserLabelTypeCode,
+                                Start = start,
+                                End = end
+                            }
+                        },
+                        ct);
 
-                var partitions = await SendRequestAsync<AccessCodePartitionAssignmentReadResponse>(
-                    sessionId,
-                    new AccessCodePartitionAssignmentReadRequest { UserNumberStart = userIndex, NumberOfUsers = 1 },
-                    ct);
-                if (partitions != null)
-                {
-                    state.RawPartitionAssignments = partitions.Data;
-                    state.Partitions = DecodePartitionAssignments(partitions.Data);
+                    if (response == null)
+                    {
+                        _logger.LogDebug(
+                            "User label request failed for range {Start}-{End} (type 0x{Type:X2}), stopping label read",
+                            start, end, UserLabelTypeCode);
+                        break;
+                    }
+
+                    for (int i = 0; i < response.Labels.Length; i++)
+                    {
+                        int userIndex = start + i;
+                        var label = response.Labels[i]?.Trim();
+                        if (!string.IsNullOrEmpty(label))
+                            labels[userIndex] = label;
+                    }
                 }
 
-                var config = await SendRequestAsync<UserCodeConfigurationReadResponse>(
-                    sessionId,
-                    new UserCodeConfigurationReadRequest { UserNumberStart = userIndex, NumberOfUsers = 1 },
-                    ct);
-                if (config != null)
-                {
-                    state.RawConfiguration = config.Data;
-                    state.HasProximityTag = ParseHasProximityTag(config.Data);
-                    state.Label = BuildLabel(userIndex, state);
-                }
-
-                state.LastUpdated = DateTime.UtcNow;
-                session.AccessCodes[userIndex] = state;
-
-                if (ok) readCount++;
-                else failedCount++;
+                if (labels.Count > 0)
+                    _logger.LogInformation("Read {Count} user labels (type 0x{Type:X2})", labels.Count, UserLabelTypeCode);
             }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "User label reading failed (type 0x{Type:X2})", UserLabelTypeCode);
+            }
+
+            return labels;
+        }
+
+        // ── Parallel user reading ────────────────────────────────────────
+
+        private async Task<AccessCodeReadResult> ReadAllUsersAsync(
+            string sessionId, Models.SessionState session, Dictionary<int, string> labels, CancellationToken ct)
+        {
+            int readCount = 0;
+            int failedCount = 0;
+            var sw = Stopwatch.StartNew();
+
+            await Parallel.ForEachAsync(
+                Enumerable.Range(1, session.MaxUsers),
+                new ParallelOptions { MaxDegreeOfParallelism = MaxConcurrentUserReads, CancellationToken = ct },
+                async (userIndex, token) =>
+                {
+                    var completed = Interlocked.Add(ref readCount, 0) + Interlocked.Add(ref failedCount, 0);
+                    session.AccessCodeReadCurrent = completed;
+                    session.AccessCodeReadProgress = $"Reading user {userIndex}/{session.MaxUsers}…";
+                    _panelState.UpdateSession(sessionId, _ => { });
+
+                    var (state, ok) = await ReadSingleUserAsync(sessionId, userIndex, labels, token);
+                    session.AccessCodes[userIndex] = state;
+
+                    if (ok) Interlocked.Increment(ref readCount);
+                    else Interlocked.Increment(ref failedCount);
+                });
+
+            sw.Stop();
+            session.AccessCodeReadCurrent = session.MaxUsers;
+            session.AccessCodeReadProgress = "Finishing…";
+            _panelState.UpdateSession(sessionId, _ => { });
+
+            _logger.LogInformation(
+                "Read {Total} users in {Elapsed}ms ({Ok} OK, {Failed} failed, concurrency={Concurrency})",
+                session.MaxUsers, sw.ElapsedMilliseconds, readCount, failedCount, MaxConcurrentUserReads);
 
             session.AccessCodesLastReadAt = DateTime.UtcNow;
             _panelState.UpdateSession(sessionId, _ => { });
@@ -140,11 +219,81 @@ namespace NeoHub.Services
         }
 
         /// <summary>
-        /// Enters programming mode for access code operations by sending ConfigurationEnter (0x0704)
-        /// with ProgrammingMode.AccessCodeProgramming and the panel's master code,
-        /// then waits for the panel to confirm via the ProgrammingLeadInOut (0x0702) notification.
-        /// Access code commands (0x0736/37/38/3C) require AccessCodeProgramming mode specifically —
-        /// InstallersProgramming returns NotInCorrectProgrammingMode.
+        /// Reads all 4 data points for a single user in parallel.
+        /// </summary>
+        private async Task<(Models.AccessCodeState state, bool ok)> ReadSingleUserAsync(
+            string sessionId, int userIndex, Dictionary<int, string> labels, CancellationToken ct)
+        {
+            var state = new Models.AccessCodeState { UserIndex = userIndex };
+
+            // Apply label if available
+            if (labels.TryGetValue(userIndex, out var userLabel))
+                state.UserLabel = userLabel;
+
+            var codeTask = SendRequestAsync<AccessCodeReadResponse>(
+                sessionId,
+                new AccessCodeReadRequest { UserNumberStart = userIndex, NumberOfUsers = 1 },
+                ct);
+            var attrTask = SendRequestAsync<AccessCodeAttributeReadResponse>(
+                sessionId,
+                new AccessCodeAttributeReadRequest { UserNumberStart = userIndex, NumberOfUsers = 1 },
+                ct);
+            var partTask = SendRequestAsync<AccessCodePartitionAssignmentReadResponse>(
+                sessionId,
+                new AccessCodePartitionAssignmentReadRequest { UserNumberStart = userIndex, NumberOfUsers = 1 },
+                ct);
+            var confTask = SendRequestAsync<UserCodeConfigurationReadResponse>(
+                sessionId,
+                new UserCodeConfigurationReadRequest { UserNumberStart = userIndex, NumberOfUsers = 1 },
+                ct);
+
+            await Task.WhenAll(codeTask, attrTask, partTask, confTask);
+
+            bool ok = true;
+
+            var accessCode = codeTask.Result;
+            if (accessCode == null)
+            {
+                ok = false;
+            }
+            else
+            {
+                state.RawAccessCode = accessCode.Data;
+                state.CodeValue = TryExtractCodeDigits(accessCode.Data);
+                state.CodeLength = state.CodeValue?.Length;
+            }
+
+            var attr = attrTask.Result;
+            if (attr != null)
+            {
+                state.RawAttributes = attr.Data;
+                state.Attributes = ParseAttributes(attr.Data);
+                state.IsActive = state.Attributes != Models.AccessCodeAttributes.None;
+            }
+
+            var partitions = partTask.Result;
+            if (partitions != null)
+            {
+                state.RawPartitionAssignments = partitions.Data;
+                state.Partitions = DecodePartitionAssignments(partitions.Data);
+            }
+
+            var config = confTask.Result;
+            if (config != null)
+            {
+                state.RawConfiguration = config.Data;
+                state.HasProximityTag = ParseHasProximityTag(config.Data);
+            }
+
+            state.LastUpdated = DateTime.UtcNow;
+            return (state, ok);
+        }
+
+        // ── Programming mode management ──────────────────────────────────
+
+        /// <summary>
+        /// Enters AccessCodeProgramming mode using the master code,
+        /// then waits for the panel to confirm via LeadIn notification.
         /// </summary>
         private async Task<bool> EnterAccessCodeModeAsync(string sessionId, string masterCode, CancellationToken ct)
         {
@@ -161,7 +310,7 @@ namespace NeoHub.Services
                 await Task.Delay(500, ct);
             }
 
-            _logger.LogInformation("Entering AccessCodeProgramming mode (0x0704, ProgrammingMode=AccessCodeProgramming, using master code)");
+            _logger.LogInformation("Entering AccessCodeProgramming mode");
 
             var enterResponse = await _mediator.Send(new SessionCommand
             {
@@ -181,10 +330,9 @@ namespace NeoHub.Services
                 return false;
             }
 
-            _logger.LogDebug("ConfigurationEnter (0x0704) accepted, waiting for ProgrammingLeadIn (0x0702)...");
+            _logger.LogDebug("ConfigurationEnter accepted, waiting for LeadIn...");
 
-            // Wait for the panel to confirm programming mode via 0x0702 LeadIn notification.
-            // The ProgrammingLeadInOutHandler sets session.IsInProgrammingMode = true.
+            // Wait for the panel to confirm programming mode.
             var deadline = DateTime.UtcNow + ProgrammingModeTimeout;
             while (!session.IsInProgrammingMode && DateTime.UtcNow < deadline)
             {
@@ -194,25 +342,24 @@ namespace NeoHub.Services
 
             if (!session.IsInProgrammingMode)
             {
-                _logger.LogWarning("Timed out waiting for ProgrammingLeadIn (0x0702) after {Timeout}s", ProgrammingModeTimeout.TotalSeconds);
+                _logger.LogWarning("Timed out waiting for LeadIn after {Timeout}s", ProgrammingModeTimeout.TotalSeconds);
                 // Try to exit cleanly even though we timed out
                 await ExitConfigModeAsync(sessionId, ct);
                 return false;
             }
 
-            _logger.LogInformation("Panel confirmed Access Code Programming mode (0x0702 LeadIn received)");
+            _logger.LogInformation("Panel confirmed AccessCodeProgramming mode");
             return true;
         }
 
         /// <summary>
-        /// Exits configuration mode by sending ConfigurationExit (0x0701).
-        /// Always best-effort — logs but does not throw on failure.
+        /// Exits configuration mode. Best-effort — logs but does not throw on failure.
         /// </summary>
         private async Task ExitConfigModeAsync(string sessionId, CancellationToken ct)
         {
             try
             {
-                _logger.LogDebug("Sending ConfigurationExit (0x0701)");
+                _logger.LogDebug("Sending ConfigurationExit");
                 await _mediator.Send(new SessionCommand
                 {
                     SessionID = sessionId,
@@ -222,15 +369,14 @@ namespace NeoHub.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to exit configuration mode (0x0701)");
+                _logger.LogWarning(ex, "Failed to exit configuration mode");
             }
         }
 
         private async Task<T?> SendRequestAsync<T>(string sessionId, IMessageData request, CancellationToken ct)
             where T : class, IMessageData
         {
-            // Requests extend CommandMessageBase — ITv2Session sends them directly and waits for response (cmd | 0x4000).
-            _logger.LogDebug("Sending direct command {Command}", request.GetType().Name);
+            _logger.LogDebug("Sending {Command}", request.GetType().Name);
 
             var response = await _mediator.Send(new SessionCommand
             {
@@ -249,24 +395,14 @@ namespace NeoHub.Services
 
         // ── Response parsing ─────────────────────────────────────────────
         //
-        // All four access-code response payloads (0x4736/37/38/3C) share a common
-        // header structure when requesting a single user at a time:
-        //
-        //   [NumberOfRecords : 1 byte]   always 0x01
-        //   [UserNumber      : 1 byte]
-        //   [Unknown          : 1 byte]   always 0x01
-        //   [Unknown          : 1 byte]   always 0x01
-        //   [DataLength       : 1 byte]   length of the data portion that follows
-        //   [Data             : DataLength bytes]
-        //
-        // The 5-byte header must be skipped before parsing the actual data.
+        // All four response payloads share a 5-byte header:
+        //   [NumberOfRecords:1] [UserNumber:1] [Unknown:1] [Unknown:1] [DataLength:1] [Data...]
 
         private const int ResponseHeaderSize = 5;
 
         /// <summary>
-        /// Extracts a BCD-encoded PIN code from an AccessCodeRead (0x4736) response payload.
-        /// Each data byte encodes two decimal digits (high nibble, low nibble).
-        /// A byte value of 0xAA indicates an empty/unset code slot.
+        /// Extracts a BCD-encoded PIN from the response payload.
+        /// Each byte = 2 digits (high/low nibble). 0xAA = empty slot.
         /// </summary>
         private static string? TryExtractCodeDigits(byte[] payload)
         {
@@ -282,7 +418,7 @@ namespace NeoHub.Services
             {
                 byte b = payload[i];
 
-                // 0xAA = empty/unset sentinel (displays as "AAAA" in DLS5)
+                // 0xAA = empty/unset sentinel
                 if (b == 0xAA)
                     return null;
 
@@ -301,25 +437,22 @@ namespace NeoHub.Services
         }
 
         /// <summary>
-        /// Checks if a user slot is active based on AccessCodeAttributeRead (0x4737) response.
-        /// A non-zero attribute byte indicates an active/configured user.
-        /// Known values: 0x0C = active with options, 0x00 = empty/disabled.
+        /// Parses the attribute byte into individual bit flags.
         /// </summary>
-        private static bool IsUserActive(byte[] payload)
+        private static Models.AccessCodeAttributes ParseAttributes(byte[] payload)
         {
             if (payload == null || payload.Length < ResponseHeaderSize + 1)
-                return false;
+                return Models.AccessCodeAttributes.None;
 
             int dataLen = payload[4];
             if (dataLen == 0 || payload.Length < ResponseHeaderSize + dataLen)
-                return false;
+                return Models.AccessCodeAttributes.None;
 
-            return payload[ResponseHeaderSize] != 0x00;
+            return (Models.AccessCodeAttributes)payload[ResponseHeaderSize];
         }
 
         /// <summary>
-        /// Decodes partition assignments from an AccessCodePartitionAssignmentRead (0x4738) response.
-        /// The data byte(s) after the header are a bitmask: bit N (LSB-first) = partition N+1.
+        /// Decodes partition assignments from a bitmask (LSB-first, bit N = partition N+1).
         /// </summary>
         private static List<byte> DecodePartitionAssignments(byte[] payload)
         {
@@ -349,8 +482,8 @@ namespace NeoHub.Services
         }
 
         /// <summary>
-        /// Checks if the user has a proximity tag (keyfob) from UserCodeConfigurationRead (0x473C).
-        /// Known values: 0x00 = none, 0x01 = standard access code (PIN only), 0x02 = proximity tag.
+        /// Checks if the user has a proximity tag.
+        /// Values: 0x00=none, 0x01=PIN, 0x02=proximity tag.
         /// </summary>
         private static bool ParseHasProximityTag(byte[] payload)
         {
@@ -362,29 +495,6 @@ namespace NeoHub.Services
                 return false;
 
             return payload[ResponseHeaderSize] == 0x02;
-        }
-
-        /// <summary>
-        /// Builds a human-readable label for the user based on their configuration.
-        /// Mirrors the DLS5 display where user 1 is "Master" and others show their type.
-        /// </summary>
-        private static string BuildLabel(int userIndex, Models.AccessCodeState state)
-        {
-            if (userIndex == 1)
-                return "Master";
-
-            var parts = new List<string>();
-
-            if (state.CodeValue != null)
-                parts.Add("PIN");
-
-            if (state.HasProximityTag)
-                parts.Add("Proximity Tag");
-
-            if (parts.Count > 0)
-                return string.Join(" + ", parts);
-
-            return state.IsActive ? "Active" : "";
         }
     }
 }

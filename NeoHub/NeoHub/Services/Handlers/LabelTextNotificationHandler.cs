@@ -7,14 +7,14 @@ namespace NeoHub.Services.Handlers
 {
     /// <summary>
     /// Handles label text notifications — both solicited (responses to our requests)
-    /// and unsolicited (panel-initiated updates). Updates zone or partition names
-    /// based on the label type byte.
+    /// and unsolicited (panel-initiated updates). Updates zone, partition, or user names.
     /// </summary>
     public class LabelTextNotificationHandler
         : INotificationHandler<SessionNotification<NotificationLabelText>>
     {
         private const int ZoneLabelType = 0xD1;
         private const int PartitionLabelType = 0xD3;
+        private const int UserLabelType = 0xD9;
 
         private readonly IPanelStateService _service;
         private readonly ILogger<LabelTextNotificationHandler> _logger;
@@ -41,6 +41,9 @@ namespace NeoHub.Services.Handlers
                     break;
                 case PartitionLabelType:
                     ApplyPartitionLabels(sessionId, msg);
+                    break;
+                case UserLabelType:
+                    ApplyUserLabels(sessionId, msg);
                     break;
                 default:
                     _logger.LogWarning(
@@ -93,6 +96,36 @@ namespace NeoHub.Services.Handlers
 
             _logger.LogDebug(
                 "Applied {Count} partition labels (Start={Start}) for session {SessionId}",
+                applied, msg.Start, sessionId);
+        }
+
+        /// <summary>
+        /// Applies user labels from NotificationLabelText.
+        /// </summary>
+        private void ApplyUserLabels(string sessionId, NotificationLabelText msg)
+        {
+            var session = _service.GetSession(sessionId);
+            if (session == null)
+            {
+                _logger.LogDebug("No session {SessionId} for user labels", sessionId);
+                return;
+            }
+
+            int applied = 0;
+            for (int i = 0; i < msg.Labels.Length; i++)
+            {
+                int userIndex = msg.Start + i;
+                var label = msg.Labels[i]?.Trim();
+
+                if (session.AccessCodes.TryGetValue(userIndex, out var state))
+                {
+                    state.UserLabel = string.IsNullOrEmpty(label) ? null : label;
+                    applied++;
+                }
+            }
+
+            _logger.LogDebug(
+                "Applied {Count} user labels (Start={Start}) for session {SessionId}",
                 applied, msg.Start, sessionId);
         }
     }
