@@ -23,8 +23,7 @@ namespace NeoHub.Services
 
         /// <summary>
         /// Number of users to read concurrently. Each user sends 4 commands in parallel,
-        /// so this value x 4 = max in-flight ITv2 commands. Keep at 1 to avoid
-        /// flooding the panel's command buffer.
+        /// so this value x 4 = max in-flight ITv2 commands.
         /// </summary>
         private const int MaxConcurrentUserReads = 2;
 
