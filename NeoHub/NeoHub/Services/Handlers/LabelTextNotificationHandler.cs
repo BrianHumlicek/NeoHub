@@ -31,21 +31,21 @@ namespace NeoHub.Services.Handlers
             var msg = notification.MessageData;
             var sessionId = notification.SessionId;
 
-            switch ((LabelType)msg.LabelType)
+            switch (msg.Collection)
             {
-                case LabelType.Zone:
+                case NotificationLabelText.LabelCollection.Zone:
                     ApplyZoneLabels(sessionId, msg);
                     break;
-                case LabelType.Partition:
+                case NotificationLabelText.LabelCollection.Partition:
                     ApplyPartitionLabels(sessionId, msg);
                     break;
-                case LabelType.AccessCode:
+                case NotificationLabelText.LabelCollection.User:
                     ApplyUserLabels(sessionId, msg);
                     break;
                 default:
                     _logger.LogWarning(
                         "Unknown label type 0x{Type:X2} for session {SessionId}, Start={Start} End={End}",
-                        msg.LabelType, sessionId, msg.Start, msg.End);
+                        msg.Collection, sessionId, msg.Start, msg.End);
                     break;
             }
 

@@ -131,7 +131,7 @@ namespace NeoHub.Services
                         {
                             Request = new NotificationLabelText
                             {
-                                LabelType = (int)LabelType.AccessCode,
+                                Collection = NotificationLabelText.LabelCollection.User,
                                 Start = start,
                                 End = end
                             }
@@ -142,7 +142,7 @@ namespace NeoHub.Services
                     {
                         _logger.LogDebug(
                             "User label request failed for range {Start}-{End} (type {Type}), stopping label read",
-                            start, end, LabelType.AccessCode);
+                            start, end, NotificationLabelText.LabelCollection.User);
                         break;
                     }
 
@@ -156,11 +156,11 @@ namespace NeoHub.Services
                 }
 
                 if (labels.Count > 0)
-                    _logger.LogInformation("Read {Count} user labels (type {Type})", labels.Count, LabelType.AccessCode);
+                    _logger.LogInformation("Read {Count} user labels (type {Type})", labels.Count, NotificationLabelText.LabelCollection.User);
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "User label reading failed (type {Type})", LabelType.AccessCode);
+                _logger.LogDebug(ex, "User label reading failed (type {Type})", NotificationLabelText.LabelCollection.User);
             }
 
             return labels;

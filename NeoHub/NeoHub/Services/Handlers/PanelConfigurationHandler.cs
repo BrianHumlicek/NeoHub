@@ -243,7 +243,7 @@ namespace NeoHub.Services.Handlers
                     sessionId,
                     new CommandRequestMessage
                     {
-                        Request = new NotificationLabelText { LabelType = (int)LabelType.Zone, Start = start, End = end }
+                        Request = new NotificationLabelText { Collection = NotificationLabelText.LabelCollection.Zone, Start = start, End = end }
                     },
                     ct);
 
@@ -267,7 +267,7 @@ namespace NeoHub.Services.Handlers
                     sessionId,
                     new CommandRequestMessage
                     {
-                        Request = new NotificationLabelText { LabelType = (int)LabelType.Partition, Start = start, End = end }
+                        Request = new NotificationLabelText { Collection = NotificationLabelText.LabelCollection.Partition, Start = start, End = end }
                     },
                     ct);
 
