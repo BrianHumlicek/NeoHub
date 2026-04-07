@@ -1,3 +1,4 @@
+using DSC.TLink.ITv2.Enumerations;
 using DSC.TLink.ITv2.MediatR;
 using DSC.TLink.ITv2.Messages;
 using MediatR;
@@ -12,10 +13,6 @@ namespace NeoHub.Services.Handlers
     public class LabelTextNotificationHandler
         : INotificationHandler<SessionNotification<NotificationLabelText>>
     {
-        private const int ZoneLabelType = 0xD1;
-        private const int PartitionLabelType = 0xD3;
-        private const int UserLabelType = 0xD9;
-
         private readonly IPanelStateService _service;
         private readonly ILogger<LabelTextNotificationHandler> _logger;
 
@@ -34,21 +31,21 @@ namespace NeoHub.Services.Handlers
             var msg = notification.MessageData;
             var sessionId = notification.SessionId;
 
-            switch (msg.Unknown)
+            switch ((LabelType)msg.LabelType)
             {
-                case ZoneLabelType:
+                case LabelType.Zone:
                     ApplyZoneLabels(sessionId, msg);
                     break;
-                case PartitionLabelType:
+                case LabelType.Partition:
                     ApplyPartitionLabels(sessionId, msg);
                     break;
-                case UserLabelType:
+                case LabelType.AccessCode:
                     ApplyUserLabels(sessionId, msg);
                     break;
                 default:
                     _logger.LogWarning(
                         "Unknown label type 0x{Type:X2} for session {SessionId}, Start={Start} End={End}",
-                        msg.Unknown, sessionId, msg.Start, msg.End);
+                        msg.LabelType, sessionId, msg.Start, msg.End);
                     break;
             }
 
@@ -117,7 +114,7 @@ namespace NeoHub.Services.Handlers
                 int userIndex = msg.Start + i;
                 var label = msg.Labels[i]?.Trim();
 
-                if (session.AccessCodes.TryGetValue(userIndex, out var state))
+                if (session.Users.TryGetValue(userIndex, out var state))
                 {
                     state.UserLabel = string.IsNullOrEmpty(label) ? null : label;
                     applied++;

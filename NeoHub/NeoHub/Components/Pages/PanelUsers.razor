@@ -1,15 +1,15 @@
-@page "/access-codes"
+@page "/panel-users"
 @using NeoHub.Services
 @using NeoHub.Services.Models
 @using DSC.TLink.ITv2.MediatR
-@inject IPanelAccessCodeService AccessCodeService
+@inject IPanelUserService UserService
 @inject IPanelStateService PanelState
 @inject IITv2SessionManager SessionManager
 @inject ISessionMonitor SessionMonitor
 @inject ISnackbar Snackbar
 @implements IDisposable
 
-<PageTitle>Access Codes</PageTitle>
+<PageTitle>Panel Users</PageTitle>
 
 <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
 
@@ -25,12 +25,12 @@
                 <MudStack Row="true" Spacing="4" AlignItems="AlignItems.Center">
                     <MudIcon Icon="@Icons.Material.Filled.Key" Size="Size.Large" />
                     <div>
-                        <MudText Typo="Typo.h5">Access Codes</MudText>
+                        <MudText Typo="Typo.h5">Panel Users</MudText>
                         <MudText Typo="Typo.caption" Color="Color.Secondary">
                             Session: @_sessionId
-                            @if (_session?.AccessCodesLastReadAt is not null)
+                            @if (_session?.UsersLastReadAt is not null)
                             {
-                                <text> · Read @_session.AccessCodesLastReadAt.Value.ToLocalTime().ToString("HH:mm:ss")</text>
+                                <text> · Read @_session.UsersLastReadAt.Value.ToLocalTime().ToString("HH:mm:ss")</text>
                             }
                             @if (_session?.MaxUsers > 0)
                             {
@@ -48,18 +48,18 @@
                     <MudSwitch T="bool" Label="Show inactive" @bind-Value="_showInactive" Color="Color.Primary" />
                     <MudButton Variant="@(IsReading ? Variant.Filled : Variant.Outlined)"
                                Color="@(IsReading ? Color.Info : Color.Default)"
-                               OnClick="ReadAccessCodesAsync"
+                               OnClick="ReadUsersAsync"
                                Disabled="@IsReading"
                                Style="position: relative; overflow: hidden;">
                         @if (IsReading)
                         {
                             <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
-                            <span>@(_session?.AccessCodeReadProgress ?? "Reading…")</span>
+                            <span>@(_session?.UserReadProgress ?? "Reading…")</span>
                         }
                         else
                         {
                             <MudIcon Icon="@Icons.Material.Filled.Download" Class="mr-1" />
-                            <span>Read Access Codes</span>
+                            <span>Read Users</span>
                         }
                     </MudButton>
                 </MudStack>
@@ -79,16 +79,16 @@
                 </MudAlert>
             }
 
-            @if (IsReading && _session?.AccessCodeReadTotal > 0)
+            @if (IsReading && _session?.UserReadTotal > 0)
             {
-                var pct = _session.AccessCodeReadTotal > 0
-                    ? (double)_session.AccessCodeReadCurrent / _session.AccessCodeReadTotal * 100
+                var pct = _session.UserReadTotal > 0
+                    ? (double)_session.UserReadCurrent / _session.UserReadTotal * 100
                     : 0;
                 <MudProgressLinear Value="@pct" Color="Color.Primary" Rounded="true" Size="Size.Small" Class="mt-2" />
             }
         </MudPaper>
 
-        @if (_session?.AccessCodes.Any() == true)
+        @if (_session?.Users.Any() == true)
         {
             <div style="overflow-x: auto;">
                 <MudSimpleTable Dense="true" Hover="true" FixedHeader="true" Style="max-height: 70vh;">
@@ -157,7 +157,7 @@
         }
         else if (!IsReading)
         {
-            <MudAlert Severity="Severity.Info">No access codes loaded yet.</MudAlert>
+            <MudAlert Severity="Severity.Info">No user data loaded yet.</MudAlert>
         }
     }
 </MudContainer>
@@ -168,13 +168,13 @@
     private bool _localReading;
     private bool _revealCodes;
     private bool _showInactive;
-    private AccessCodeReadResult? _lastResult;
+    private PanelUserReadResult? _lastResult;
     private bool _disposed;
 
     /// <summary>
     /// True if a read is in progress (local or background). Survives page refresh.
     /// </summary>
-    private bool IsReading => _localReading || (_session?.IsReadingAccessCodes ?? false);
+    private bool IsReading => _localReading || (_session?.IsReadingUsers ?? false);
 
     protected override void OnInitialized()
     {
@@ -215,7 +215,7 @@
         _session = _sessionId is null ? null : PanelState.GetSession(_sessionId);
     }
 
-    private async Task ReadAccessCodesAsync()
+    private async Task ReadUsersAsync()
     {
         if (_sessionId is null || IsReading)
             return;
@@ -226,13 +226,13 @@
 
         try
         {
-            _lastResult = await AccessCodeService.ReadAllAsync(_sessionId, CancellationToken.None);
+            _lastResult = await UserService.ReadAllAsync(_sessionId, CancellationToken.None);
             _session = PanelState.GetSession(_sessionId);
 
             if (_lastResult.Success)
-                Snackbar.Add("Access codes read finished", Severity.Success);
+                Snackbar.Add("User read finished", Severity.Success);
             else
-                Snackbar.Add($"Access code read failed: {_lastResult.ErrorMessage}", Severity.Error);
+                Snackbar.Add($"User read failed: {_lastResult.ErrorMessage}", Severity.Error);
         }
         finally
         {
@@ -241,49 +241,49 @@
         }
     }
 
-    private IEnumerable<AccessCodeState> GetFilteredUsers()
+    private IEnumerable<PanelUserState> GetFilteredUsers()
     {
-        if (_session == null) return Enumerable.Empty<AccessCodeState>();
+        if (_session == null) return Enumerable.Empty<PanelUserState>();
 
-        var users = _session.AccessCodes.Values.OrderBy(x => x.UserIndex);
+        var users = _session.Users.Values.OrderBy(x => x.UserIndex);
         return _showInactive ? users : users.Where(x => x.IsActive);
     }
 
-    private string FormatCode(AccessCodeState code)
+    private string FormatCode(PanelUserState user)
     {
-        if (string.IsNullOrEmpty(code.CodeValue))
+        if (string.IsNullOrEmpty(user.CodeValue))
             return "—";
         if (_revealCodes)
-            return code.CodeValue;
-        return new string('*', Math.Max(4, code.CodeValue.Length));
+            return user.CodeValue;
+        return new string('*', Math.Max(4, user.CodeValue.Length));
     }
 
-    private static string GetCodeTypeText(AccessCodeState code)
+    private static string GetCodeTypeText(PanelUserState user)
     {
-        if (!code.IsActive)
+        if (!user.IsActive)
             return "—";
 
         var parts = new List<string>();
-        if (!string.IsNullOrEmpty(code.CodeValue))
+        if (!string.IsNullOrEmpty(user.CodeValue))
             parts.Add("PIN");
-        if (code.HasProximityTag)
+        if (user.HasProximityTag)
             parts.Add("Proximity");
         return parts.Count > 0 ? string.Join(" + ", parts) : "—";
     }
 
-    private static RenderFragment RenderAttributeTooltip(AccessCodeAttributes attrs) => __builder =>
+    private static RenderFragment RenderAttributeTooltip(PanelUserAttributes attrs) => __builder =>
     {
         <div style="font-size:0.85em; line-height:1.6;">
             <div style="font-weight:600; margin-bottom:2px;">Attributes [@($"0x{(byte)attrs:X2}")]</div>
             @{
-                var allFlags = new (AccessCodeAttributes flag, string name)[]
+                var allFlags = new (PanelUserAttributes flag, string name)[]
                 {
-                    (AccessCodeAttributes.Supervisor,    "Supervisor"),
-                    (AccessCodeAttributes.DuressCode,    "Duress Code"),
-                    (AccessCodeAttributes.CanBypassZone, "Can Bypass Zone"),
-                    (AccessCodeAttributes.RemoteAccess,  "Remote Access"),
-                    (AccessCodeAttributes.BellSquawk,    "Bell Squawk"),
-                    (AccessCodeAttributes.OneTimeUse,    "One-Time Use"),
+                    (PanelUserAttributes.Supervisor,    "Supervisor"),
+                    (PanelUserAttributes.DuressCode,    "Duress Code"),
+                    (PanelUserAttributes.CanBypassZone, "Can Bypass Zone"),
+                    (PanelUserAttributes.RemoteAccess,  "Remote Access"),
+                    (PanelUserAttributes.BellSquawk,    "Bell Squawk"),
+                    (PanelUserAttributes.OneTimeUse,    "One-Time Use"),
                 };
             }
             @foreach (var (flag, name) in allFlags)
@@ -294,7 +294,7 @@
         </div>
     };
 
-    private static RenderFragment GetUserStatusChip(AccessCodeState user) => __builder =>
+    private static RenderFragment GetUserStatusChip(PanelUserState user) => __builder =>
     {
         if (!user.IsActive)
         {

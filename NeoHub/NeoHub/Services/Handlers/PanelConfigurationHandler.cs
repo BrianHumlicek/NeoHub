@@ -1,4 +1,5 @@
 using DSC.TLink.ITv2;
+using DSC.TLink.ITv2.Enumerations;
 using DSC.TLink.ITv2.MediatR;
 using DSC.TLink.ITv2.Messages;
 using MediatR;
@@ -242,7 +243,7 @@ namespace NeoHub.Services.Handlers
                     sessionId,
                     new CommandRequestMessage
                     {
-                        Request = new NotificationLabelText { Unknown = 0xD1, Start = start, End = end }
+                        Request = new NotificationLabelText { LabelType = (int)LabelType.Zone, Start = start, End = end }
                     },
                     ct);
 
@@ -266,7 +267,7 @@ namespace NeoHub.Services.Handlers
                     sessionId,
                     new CommandRequestMessage
                     {
-                        Request = new NotificationLabelText { Unknown = 0xD3, Start = start, End = end }
+                        Request = new NotificationLabelText { LabelType = (int)LabelType.Partition, Start = start, End = end }
                     },
                     ct);
 

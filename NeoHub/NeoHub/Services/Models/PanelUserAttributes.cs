@@ -6,7 +6,7 @@ namespace NeoHub.Services.Models
     /// Empty/disabled users have 0x00.
     /// </summary>
     [Flags]
-    public enum AccessCodeAttributes : byte
+    public enum PanelUserAttributes : byte
     {
         None          = 0x00,
         Supervisor    = 0x01,  // Bit 0 — user has supervisor privileges

@@ -9,12 +9,12 @@ using NeoHub.Services.Settings;
 
 namespace NeoHub.Services
 {
-    public class PanelAccessCodeService : IPanelAccessCodeService
+    public class PanelUserService : IPanelUserService
     {
         private readonly IMediator _mediator;
         private readonly IPanelStateService _panelState;
         private readonly IOptionsMonitor<ApplicationSettings> _appSettings;
-        private readonly ILogger<PanelAccessCodeService> _logger;
+        private readonly ILogger<PanelUserService> _logger;
 
         /// <summary>
         /// How long to wait for programming mode confirmation (LeadIn) after ConfigurationEnter.
@@ -26,24 +26,18 @@ namespace NeoHub.Services
         /// so this value x 4 = max in-flight ITv2 commands. Keep at 1 to avoid
         /// flooding the panel's command buffer.
         /// </summary>
-        private const int MaxConcurrentUserReads = 1;
+        private const int MaxConcurrentUserReads = 2;
 
         /// <summary>
         /// Max labels to request per batch via NotificationLabelText.
         /// </summary>
         private const int MaxLabelsPerRequest = 4;
 
-        /// <summary>
-        /// NotificationLabelText type for user/access code labels.
-        /// Known types: 0xD1=zone, 0xD3=partition, 0xD9=user.
-        /// </summary>
-        private const int UserLabelTypeCode = 0xD9;
-
-        public PanelAccessCodeService(
+        public PanelUserService(
             IMediator mediator,
             IPanelStateService panelState,
             IOptionsMonitor<ApplicationSettings> appSettings,
-            ILogger<PanelAccessCodeService> logger)
+            ILogger<PanelUserService> logger)
         {
             _mediator = mediator;
             _panelState = panelState;
@@ -51,26 +45,26 @@ namespace NeoHub.Services
             _logger = logger;
         }
 
-        public async Task<AccessCodeReadResult> ReadAllAsync(string sessionId, CancellationToken ct)
+        public async Task<PanelUserReadResult> ReadAllAsync(string sessionId, CancellationToken ct)
         {
             var session = _panelState.GetSession(sessionId);
             if (session == null)
-                return new AccessCodeReadResult(false, "Session not found");
+                return new PanelUserReadResult(false, "Session not found");
 
             if (session.MaxUsers <= 0)
-                return new AccessCodeReadResult(false, "Panel reported zero users");
+                return new PanelUserReadResult(false, "Panel reported zero users");
 
-            _logger.LogInformation("Reading access codes for session {SessionId}, max users: {MaxUsers}", sessionId, session.MaxUsers);
+            _logger.LogInformation("Reading panel users for session {SessionId}, max users: {MaxUsers}", sessionId, session.MaxUsers);
 
             // Access code commands require AccessCodeProgramming mode with the master code.
             var masterCode = _appSettings.CurrentValue.DefaultAccessCode;
             if (string.IsNullOrWhiteSpace(masterCode))
-                return new AccessCodeReadResult(false, "Master code (DefaultAccessCode) not configured");
+                return new PanelUserReadResult(false, "Master code (DefaultAccessCode) not configured");
 
-            session.IsReadingAccessCodes = true;
-            session.AccessCodeReadCurrent = 0;
-            session.AccessCodeReadTotal = session.MaxUsers;
-            session.AccessCodeReadProgress = null;
+            session.IsReadingUsers = true;
+            session.UserReadCurrent = 0;
+            session.UserReadTotal = session.MaxUsers;
+            session.UserReadProgress = null;
             _panelState.UpdateSession(sessionId, _ => { });
 
             try
@@ -82,9 +76,9 @@ namespace NeoHub.Services
                 // 2. Enter programming mode for access code commands
                 UpdateProgress(session, sessionId, "Entering programming mode…");
                 if (!await EnterAccessCodeModeAsync(sessionId, masterCode, ct))
-                    return new AccessCodeReadResult(false, "Failed to enter programming mode");
+                    return new PanelUserReadResult(false, "Failed to enter programming mode");
 
-                AccessCodeReadResult result;
+                PanelUserReadResult result;
                 try
                 {
                     // 3. Read all users (4 commands per user in parallel)
@@ -99,10 +93,10 @@ namespace NeoHub.Services
             }
             finally
             {
-                session.IsReadingAccessCodes = false;
-                session.AccessCodeReadProgress = null;
-                session.AccessCodeReadCurrent = 0;
-                session.AccessCodeReadTotal = 0;
+                session.IsReadingUsers = false;
+                session.UserReadProgress = null;
+                session.UserReadCurrent = 0;
+                session.UserReadTotal = 0;
                 _panelState.UpdateSession(sessionId, _ => { });
             }
         }
@@ -111,7 +105,7 @@ namespace NeoHub.Services
 
         private void UpdateProgress(Models.SessionState session, string sessionId, string message)
         {
-            session.AccessCodeReadProgress = message;
+            session.UserReadProgress = message;
             _panelState.UpdateSession(sessionId, _ => { });
         }
 
@@ -138,7 +132,7 @@ namespace NeoHub.Services
                         {
                             Request = new NotificationLabelText
                             {
-                                Unknown = UserLabelTypeCode,
+                                LabelType = (int)LabelType.AccessCode,
                                 Start = start,
                                 End = end
                             }
@@ -148,8 +142,8 @@ namespace NeoHub.Services
                     if (response == null)
                     {
                         _logger.LogDebug(
-                            "User label request failed for range {Start}-{End} (type 0x{Type:X2}), stopping label read",
-                            start, end, UserLabelTypeCode);
+                            "User label request failed for range {Start}-{End} (type {Type}), stopping label read",
+                            start, end, LabelType.AccessCode);
                         break;
                     }
 
@@ -163,11 +157,11 @@ namespace NeoHub.Services
                 }
 
                 if (labels.Count > 0)
-                    _logger.LogInformation("Read {Count} user labels (type 0x{Type:X2})", labels.Count, UserLabelTypeCode);
+                    _logger.LogInformation("Read {Count} user labels (type {Type})", labels.Count, LabelType.AccessCode);
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "User label reading failed (type 0x{Type:X2})", UserLabelTypeCode);
+                _logger.LogDebug(ex, "User label reading failed (type {Type})", LabelType.AccessCode);
             }
 
             return labels;
@@ -175,7 +169,7 @@ namespace NeoHub.Services
 
         // ── Parallel user reading ────────────────────────────────────────
 
-        private async Task<AccessCodeReadResult> ReadAllUsersAsync(
+        private async Task<PanelUserReadResult> ReadAllUsersAsync(
             string sessionId, Models.SessionState session, Dictionary<int, string> labels, CancellationToken ct)
         {
             int readCount = 0;
@@ -188,30 +182,30 @@ namespace NeoHub.Services
                 async (userIndex, token) =>
                 {
                     var completed = Interlocked.Add(ref readCount, 0) + Interlocked.Add(ref failedCount, 0);
-                    session.AccessCodeReadCurrent = completed;
-                    session.AccessCodeReadProgress = $"Reading user {userIndex}/{session.MaxUsers}…";
+                    session.UserReadCurrent = completed;
+                    session.UserReadProgress = $"Reading user {userIndex}/{session.MaxUsers}…";
                     _panelState.UpdateSession(sessionId, _ => { });
 
                     var (state, ok) = await ReadSingleUserAsync(sessionId, userIndex, labels, token);
-                    session.AccessCodes[userIndex] = state;
+                    session.Users[userIndex] = state;
 
                     if (ok) Interlocked.Increment(ref readCount);
                     else Interlocked.Increment(ref failedCount);
                 });
 
             sw.Stop();
-            session.AccessCodeReadCurrent = session.MaxUsers;
-            session.AccessCodeReadProgress = "Finishing…";
+            session.UserReadCurrent = session.MaxUsers;
+            session.UserReadProgress = "Finishing…";
             _panelState.UpdateSession(sessionId, _ => { });
 
             _logger.LogInformation(
                 "Read {Total} users in {Elapsed}ms ({Ok} OK, {Failed} failed, concurrency={Concurrency})",
                 session.MaxUsers, sw.ElapsedMilliseconds, readCount, failedCount, MaxConcurrentUserReads);
 
-            session.AccessCodesLastReadAt = DateTime.UtcNow;
+            session.UsersLastReadAt = DateTime.UtcNow;
             _panelState.UpdateSession(sessionId, _ => { });
 
-            return new AccessCodeReadResult(true)
+            return new PanelUserReadResult(true)
             {
                 ReadCount = readCount,
                 FailedCount = failedCount,
@@ -220,11 +214,12 @@ namespace NeoHub.Services
 
         /// <summary>
         /// Reads all 4 data points for a single user in parallel.
+        /// Uses computed properties from formalized response messages.
         /// </summary>
-        private async Task<(Models.AccessCodeState state, bool ok)> ReadSingleUserAsync(
+        private async Task<(Models.PanelUserState state, bool ok)> ReadSingleUserAsync(
             string sessionId, int userIndex, Dictionary<int, string> labels, CancellationToken ct)
         {
-            var state = new Models.AccessCodeState { UserIndex = userIndex };
+            var state = new Models.PanelUserState { UserIndex = userIndex };
 
             // Apply label if available
             if (labels.TryGetValue(userIndex, out var userLabel))
@@ -258,31 +253,27 @@ namespace NeoHub.Services
             }
             else
             {
-                state.RawAccessCode = accessCode.Data;
-                state.CodeValue = TryExtractCodeDigits(accessCode.Data);
+                state.CodeValue = accessCode.PinCode;
                 state.CodeLength = state.CodeValue?.Length;
             }
 
             var attr = attrTask.Result;
             if (attr != null)
             {
-                state.RawAttributes = attr.Data;
-                state.Attributes = ParseAttributes(attr.Data);
-                state.IsActive = state.Attributes != Models.AccessCodeAttributes.None;
+                state.Attributes = (Models.PanelUserAttributes)attr.AttributeFlags;
+                state.IsActive = state.Attributes != Models.PanelUserAttributes.None;
             }
 
             var partitions = partTask.Result;
             if (partitions != null)
             {
-                state.RawPartitionAssignments = partitions.Data;
-                state.Partitions = DecodePartitionAssignments(partitions.Data);
+                state.Partitions = partitions.AssignedPartitions;
             }
 
             var config = confTask.Result;
             if (config != null)
             {
-                state.RawConfiguration = config.Data;
-                state.HasProximityTag = ParseHasProximityTag(config.Data);
+                state.HasProximityTag = config.HasProximityTag;
             }
 
             state.LastUpdated = DateTime.UtcNow;
@@ -304,7 +295,7 @@ namespace NeoHub.Services
             // If panel is already in programming mode, exit first to avoid "partition busy"
             if (session.IsInProgrammingMode)
             {
-                _logger.LogDebug("Panel already in programming mode, exiting first before access code read");
+                _logger.LogDebug("Panel already in programming mode, exiting first before user read");
                 await ExitConfigModeAsync(sessionId, ct);
                 // Brief pause to let panel process the exit
                 await Task.Delay(500, ct);
@@ -386,115 +377,11 @@ namespace NeoHub.Services
 
             if (!response.Success)
             {
-                _logger.LogWarning("Access-code command {Command} failed: {Error}", request.GetType().Name, response.ErrorMessage);
+                _logger.LogWarning("User read command {Command} failed: {Error}", request.GetType().Name, response.ErrorMessage);
                 return null;
             }
 
             return response.MessageData as T;
-        }
-
-        // ── Response parsing ─────────────────────────────────────────────
-        //
-        // All four response payloads share a 5-byte header:
-        //   [NumberOfRecords:1] [UserNumber:1] [Unknown:1] [Unknown:1] [DataLength:1] [Data...]
-
-        private const int ResponseHeaderSize = 5;
-
-        /// <summary>
-        /// Extracts a BCD-encoded PIN from the response payload.
-        /// Each byte = 2 digits (high/low nibble). 0xAA = empty slot.
-        /// </summary>
-        private static string? TryExtractCodeDigits(byte[] payload)
-        {
-            if (payload == null || payload.Length < ResponseHeaderSize + 1)
-                return null;
-
-            int dataLen = payload[4];
-            if (dataLen == 0 || payload.Length < ResponseHeaderSize + dataLen)
-                return null;
-
-            var sb = new System.Text.StringBuilder(dataLen * 2);
-            for (int i = ResponseHeaderSize; i < ResponseHeaderSize + dataLen; i++)
-            {
-                byte b = payload[i];
-
-                // 0xAA = empty/unset sentinel
-                if (b == 0xAA)
-                    return null;
-
-                int high = (b >> 4) & 0x0F;
-                int low = b & 0x0F;
-
-                // Valid BCD digits are 0-9
-                if (high > 9 || low > 9)
-                    return null;
-
-                sb.Append((char)('0' + high));
-                sb.Append((char)('0' + low));
-            }
-
-            return sb.Length > 0 ? sb.ToString() : null;
-        }
-
-        /// <summary>
-        /// Parses the attribute byte into individual bit flags.
-        /// </summary>
-        private static Models.AccessCodeAttributes ParseAttributes(byte[] payload)
-        {
-            if (payload == null || payload.Length < ResponseHeaderSize + 1)
-                return Models.AccessCodeAttributes.None;
-
-            int dataLen = payload[4];
-            if (dataLen == 0 || payload.Length < ResponseHeaderSize + dataLen)
-                return Models.AccessCodeAttributes.None;
-
-            return (Models.AccessCodeAttributes)payload[ResponseHeaderSize];
-        }
-
-        /// <summary>
-        /// Decodes partition assignments from a bitmask (LSB-first, bit N = partition N+1).
-        /// </summary>
-        private static List<byte> DecodePartitionAssignments(byte[] payload)
-        {
-            var result = new List<byte>();
-            if (payload == null || payload.Length < ResponseHeaderSize + 1)
-                return result;
-
-            int dataLen = payload[4];
-            if (dataLen == 0 || payload.Length < ResponseHeaderSize + dataLen)
-                return result;
-
-            for (int i = 0; i < dataLen; i++)
-            {
-                byte bitmap = payload[ResponseHeaderSize + i];
-                for (int bit = 0; bit < 8; bit++)
-                {
-                    if ((bitmap & (1 << bit)) != 0)
-                    {
-                        int partition = i * 8 + bit + 1;
-                        if (partition <= byte.MaxValue)
-                            result.Add((byte)partition);
-                    }
-                }
-            }
-
-            return result;
-        }
-
-        /// <summary>
-        /// Checks if the user has a proximity tag.
-        /// Values: 0x00=none, 0x01=PIN, 0x02=proximity tag.
-        /// </summary>
-        private static bool ParseHasProximityTag(byte[] payload)
-        {
-            if (payload == null || payload.Length < ResponseHeaderSize + 1)
-                return false;
-
-            int dataLen = payload[4];
-            if (dataLen == 0 || payload.Length < ResponseHeaderSize + dataLen)
-                return false;
-
-            return payload[ResponseHeaderSize] == 0x02;
         }
     }
 }

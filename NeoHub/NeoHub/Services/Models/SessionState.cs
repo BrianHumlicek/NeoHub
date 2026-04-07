@@ -16,28 +16,28 @@ namespace NeoHub.Services.Models
         public int MaxUsers { get; set; }
         public Dictionary<byte, PartitionState> Partitions { get; } = new();
         public Dictionary<byte, ZoneState> Zones { get; } = new();
-        public ConcurrentDictionary<int, AccessCodeState> AccessCodes { get; } = new();
-        public DateTime? AccessCodesLastReadAt { get; set; }
+        public ConcurrentDictionary<int, PanelUserState> Users { get; } = new();
+        public DateTime? UsersLastReadAt { get; set; }
 
         /// <summary>
-        /// True while access code reading is in progress. Survives page refresh.
+        /// True while user reading is in progress. Survives page refresh.
         /// </summary>
-        public bool IsReadingAccessCodes { get; set; }
+        public bool IsReadingUsers { get; set; }
 
         /// <summary>
         /// Current reading phase description, e.g. "Reading user 12/48..."
         /// </summary>
-        public string? AccessCodeReadProgress { get; set; }
+        public string? UserReadProgress { get; set; }
 
         /// <summary>
         /// Number of users read so far.
         /// </summary>
-        public int AccessCodeReadCurrent { get; set; }
+        public int UserReadCurrent { get; set; }
 
         /// <summary>
         /// Total number of users to read.
         /// </summary>
-        public int AccessCodeReadTotal { get; set; }
+        public int UserReadTotal { get; set; }
 
         /// <summary>
         /// Installer configuration data read via SectionRead.
