@@ -7,6 +7,8 @@ namespace DSC.TLink.ITv2.Messages
     {
         [IgnoreProperty]
         public ITv2Command Command { get; set; } = ITv2Command.Unknown;
+        [IgnoreProperty]
+        public string? DeserializationError { get; set; }
         public byte[] Data { get; init; } = Array.Empty<byte>();
     }
 }

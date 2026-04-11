@@ -71,20 +71,22 @@ namespace DSC.TLink.ITv2.Messages
         /// </summary>
         public static IMessageData DeserializeMessage(ITv2Command command, ReadOnlySpan<byte> payload)
         {
+            string? deserializationError = null;
             if (_commandLookup.TryGetValue(command, out var type))
             {
                 try
                 {
                     return (IMessageData)BinarySerializer.Deserialize(type, payload);
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // Typed deserialization failed; fall back to DefaultMessage below
+                    deserializationError = $"Failed to deserialize as {type.Name}: {ex.Message}";
                 }
             }
 
             var defaultMsg = (DefaultMessage)BinarySerializer.Deserialize(typeof(DefaultMessage), payload);
             defaultMsg.Command = command;
+            defaultMsg.DeserializationError = deserializationError;
             return defaultMsg;
         }
 
