@@ -209,11 +209,11 @@ namespace DSC.TLink.Serialization
             for (int i = 0; i < fixedLength; i++)
             {
                 byte b = bytes[offset++];
-                sb.Append((b >> 4) & 0x0F);
-                sb.Append(b & 0x0F);
+                sb.Append($"{(b >> 4) & 0x0F:X}");
+                sb.Append($"{b & 0x0F:X}");
             }
 
-            return sb.ToString().TrimEnd('0');
+            return sb.ToString();
         }
 
         private static int ReadLengthPrefix1(ReadOnlySpan<byte> bytes, ref int offset, string propertyName)
