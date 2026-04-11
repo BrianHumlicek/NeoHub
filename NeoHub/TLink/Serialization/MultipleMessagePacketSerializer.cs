@@ -21,7 +21,8 @@ namespace DSC.TLink.Serialization
     /// <summary>
     /// Handles serialization of MultipleMessagePacket, which contains an unbounded list
     /// of length-prefixed message payloads. Each sub-message is serialized with MessageFactory
-    /// (including its command header) and prefixed with a 2-byte length.
+    /// (including its command header) and prefixed with a variable-length size
+    /// (same encoding as ITv2 framing: 1 byte if &lt; 0x80, otherwise 2 bytes with bit 7 set on the first).
     /// </summary>
     internal static class MultipleMessagePacketSerializer
     {
@@ -34,11 +35,11 @@ namespace DSC.TLink.Serialization
 
                 var messageBytes = MessageFactory.SerializeMessage(message);
 
-                if (messageBytes.Count > 65535)
+                if (messageBytes.Count > 0x7FFF)
                     throw new InvalidOperationException(
-                        $"Message payload exceeds maximum length of 65535 bytes (got {messageBytes.Count})");
+                        $"Message payload exceeds maximum length of {0x7FFF} bytes (got {messageBytes.Count})");
 
-                PrimitiveSerializer.WriteUInt16(bytes, (ushort)messageBytes.Count);
+                WriteLength(bytes, messageBytes.Count);
                 bytes.AddRange(messageBytes.ToArray());
             }
         }
@@ -49,12 +50,7 @@ namespace DSC.TLink.Serialization
 
             while (offset < bytes.Length)
             {
-                if (offset + 1 > bytes.Length)
-                    throw new InvalidOperationException(
-                        "Incomplete length prefix in MultipleMessagePacket");
-
-                ushort messageLength = bytes[offset];
-                offset += 1;
+                int messageLength = ReadLength(bytes, ref offset);
 
                 if (offset + messageLength > bytes.Length)
                     throw new InvalidOperationException(
@@ -68,6 +64,36 @@ namespace DSC.TLink.Serialization
             }
 
             return messages.ToArray();
+        }
+
+        // Variable-length prefix: same encoding as ITv2Framing (1 byte if < 0x80, else 2 bytes with bit 7 set).
+        private static void WriteLength(List<byte> bytes, int length)
+        {
+            if (length > 0x7F)
+            {
+                bytes.Add((byte)((length >> 8) | 0x80));
+                bytes.Add((byte)(length & 0xFF));
+            }
+            else
+            {
+                bytes.Add((byte)length);
+            }
+        }
+
+        private static int ReadLength(ReadOnlySpan<byte> bytes, ref int offset)
+        {
+            if (offset >= bytes.Length)
+                throw new InvalidOperationException("Incomplete length prefix in MultipleMessagePacket");
+
+            byte first = bytes[offset++];
+            if ((first & 0x80) != 0)
+            {
+                if (offset >= bytes.Length)
+                    throw new InvalidOperationException("Incomplete 2-byte length prefix in MultipleMessagePacket");
+                byte second = bytes[offset++];
+                return ((first & 0x7F) << 8) | second;
+            }
+            return first;
         }
     }
 }
