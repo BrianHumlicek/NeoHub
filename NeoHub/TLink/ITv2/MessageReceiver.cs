@@ -97,6 +97,11 @@ internal sealed class MessageReceiver : IMessageReceiver
                 _tcs.TrySetResult(null);
                 return true;
             }
+            // Protocol-level ack for a command; consume without completing
+            if (packet.Message is SimpleAck && _commandSequence is not null)
+            {
+                return true;
+            }
         }
 
         if (packet.Message is ICommandMessage commandMessage)
