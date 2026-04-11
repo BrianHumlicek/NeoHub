@@ -7,6 +7,7 @@ using MediatR;
 using Microsoft.Extensions.Options;
 using NeoHub.Services.Settings;
 using static DSC.TLink.ITv2.Messages.AccessCodeAttributeReadResponse;
+using static DSC.TLink.ITv2.Messages.UserCodeConfigurationReadResponse;
 
 namespace NeoHub.Services
 {
@@ -23,15 +24,20 @@ namespace NeoHub.Services
         private static readonly TimeSpan ProgrammingModeTimeout = TimeSpan.FromSeconds(10);
 
         /// <summary>
-        /// Number of users to read concurrently. Each user sends 4 commands in parallel,
-        /// so this value x 4 = max in-flight ITv2 commands.
+        /// Conservative max ITv2 message payload in bytes.
         /// </summary>
-        private const int MaxConcurrentUserReads = 2;
+        private const int MaxPayloadBytes = 255;
+
+        /// <summary>
+        /// Fixed header overhead per batch response (Start CI + Count CI + DataWidth/BCDLen).
+        /// </summary>
+        private const int BatchHeaderOverhead = 5;
 
         /// <summary>
         /// Max labels to request per batch via NotificationLabelText.
+        /// Labels are ~28 bytes each (14 chars × 2 bytes BigEndianUnicode) + ~6 bytes header.
         /// </summary>
-        private const int MaxLabelsPerRequest = 4;
+        private static readonly int MaxLabelsPerRequest = MaxRecordsPerBatch(28, headerOverhead: 6);
 
         public PanelUserService(
             IMediator mediator,
@@ -81,7 +87,7 @@ namespace NeoHub.Services
                 PanelUserReadResult result;
                 try
                 {
-                    // 3. Read all users (4 commands per user in parallel)
+                    // 3. Batch-read all user data types in parallel
                     result = await ReadAllUsersAsync(sessionId, session, labels, ct);
                 }
                 finally
@@ -167,40 +173,109 @@ namespace NeoHub.Services
             return labels;
         }
 
-        // ── Parallel user reading ────────────────────────────────────────
+        // ── Batch size calculation ────────────────────────────────────────
+
+        /// <summary>
+        /// Calculates how many records fit in a single response message.
+        /// </summary>
+        private static int MaxRecordsPerBatch(int bytesPerRecord, int headerOverhead = BatchHeaderOverhead)
+            => Math.Max(1, (MaxPayloadBytes - headerOverhead) / Math.Max(1, bytesPerRecord));
+
+        // ── Batched user reading ─────────────────────────────────────────
 
         private async Task<PanelUserReadResult> ReadAllUsersAsync(
             string sessionId, Models.SessionState session, Dictionary<int, string> labels, CancellationToken ct)
         {
-            int readCount = 0;
-            int failedCount = 0;
+            int maxUsers = session.MaxUsers;
+            int partitionWidth = Math.Max(1, (session.MaxPartitions + 7) / 8);
             var sw = Stopwatch.StartNew();
 
-            await Parallel.ForEachAsync(
-                Enumerable.Range(1, session.MaxUsers),
-                new ParallelOptions { MaxDegreeOfParallelism = MaxConcurrentUserReads, CancellationToken = ct },
-                async (userIndex, token) =>
+            UpdateProgress(session, sessionId, "Reading user data…");
+
+            // Run all 4 data type reads in parallel — each batches internally
+            var codesTask = ReadBatchedAsync<AccessCodeReadResponse, string>(
+                sessionId, maxUsers,
+                MaxRecordsPerBatch(bytesPerRecord: 4), // Conservative: 8-digit codes = 4 BCD bytes
+                (start, count) => new AccessCodeReadRequest { AccessCodeStart = start, AccessCodeCount = count },
+                r => r.AccessCodes,
+                ct);
+
+            var attrsTask = ReadBatchedAsync<AccessCodeAttributeReadResponse, PanelUserAttributes>(
+                sessionId, maxUsers,
+                MaxRecordsPerBatch(bytesPerRecord: 1),
+                (start, count) => new AccessCodeAttributeReadRequest { AccessCodeStart = start, AccessCodeCount = count },
+                r => r.Attributes,
+                ct);
+
+            var partsTask = ReadBatchedAsync<AccessCodePartitionAssignmentReadResponse, List<byte>>(
+                sessionId, maxUsers,
+                MaxRecordsPerBatch(bytesPerRecord: partitionWidth),
+                (start, count) => new AccessCodePartitionAssignmentReadRequest { AccessCodeStart = start, AccessCodeCount = count },
+                r => r.PartitionAssignments,
+                ct);
+
+            var confsTask = ReadBatchedAsync<UserCodeConfigurationReadResponse, UserCodeType>(
+                sessionId, maxUsers,
+                MaxRecordsPerBatch(bytesPerRecord: 1),
+                (start, count) => new UserCodeConfigurationReadRequest { UserCodeStart = start, UserCodeCount = count },
+                r => r.CodeType,
+                ct);
+
+            await Task.WhenAll(codesTask, attrsTask, partsTask, confsTask);
+
+            var codes = codesTask.Result;
+            var attrs = attrsTask.Result;
+            var parts = partsTask.Result;
+            var confs = confsTask.Result;
+
+            // Assemble PanelUserState from batch results
+            int readCount = 0, failedCount = 0;
+            for (int i = 1; i <= maxUsers; i++)
+            {
+                var state = new Models.PanelUserState { UserIndex = i };
+
+                if (labels.TryGetValue(i, out var label))
+                    state.UserLabel = label;
+
+                if (codes.TryGetValue(i, out var code))
                 {
-                    var completed = Interlocked.Add(ref readCount, 0) + Interlocked.Add(ref failedCount, 0);
-                    session.UserReadCurrent = completed;
-                    session.UserReadProgress = $"Reading user {userIndex}/{session.MaxUsers}…";
-                    _panelState.UpdateSession(sessionId, _ => { });
+                    state.CodeValue = code;
+                    state.CodeLength = code?.Length;
+                    readCount++;
+                }
+                else
+                {
+                    failedCount++;
+                }
 
-                    var (state, ok) = await ReadSingleUserAsync(sessionId, userIndex, labels, token);
-                    session.Users[userIndex] = state;
+                if (attrs.TryGetValue(i, out var attr))
+                {
+                    state.Attributes = attr;
+                    state.IsActive = attr != PanelUserAttributes.None;
+                }
 
-                    if (ok) Interlocked.Increment(ref readCount);
-                    else Interlocked.Increment(ref failedCount);
-                });
+                if (parts.TryGetValue(i, out var partList))
+                    state.Partitions = partList;
+
+                if (confs.TryGetValue(i, out var codeType))
+                    state.HasProximityTag = codeType == UserCodeType.ProximityTag;
+
+                state.LastUpdated = DateTime.UtcNow;
+                session.Users[i] = state;
+            }
 
             sw.Stop();
-            session.UserReadCurrent = session.MaxUsers;
+            session.UserReadCurrent = maxUsers;
             session.UserReadProgress = "Finishing…";
             _panelState.UpdateSession(sessionId, _ => { });
 
             _logger.LogInformation(
-                "Read {Total} users in {Elapsed}ms ({Ok} OK, {Failed} failed, concurrency={Concurrency})",
-                session.MaxUsers, sw.ElapsedMilliseconds, readCount, failedCount, MaxConcurrentUserReads);
+                "Read {Total} users in {Elapsed}ms ({Ok} OK, {Failed} failed, batches: codes={CodeBatches} attrs={AttrBatches} parts={PartBatches} conf={ConfBatches})",
+                maxUsers, sw.ElapsedMilliseconds, readCount, failedCount,
+                CeilDiv(maxUsers, MaxRecordsPerBatch(4)),
+                CeilDiv(maxUsers, MaxRecordsPerBatch(1)),
+                CeilDiv(maxUsers, MaxRecordsPerBatch(partitionWidth)),
+                CeilDiv(maxUsers, MaxRecordsPerBatch(1)));
 
             session.UsersLastReadAt = DateTime.UtcNow;
             _panelState.UpdateSession(sessionId, _ => { });
@@ -212,72 +287,39 @@ namespace NeoHub.Services
             };
         }
 
+        private static int CeilDiv(int a, int b) => (a + b - 1) / b;
+
         /// <summary>
-        /// Reads all 4 data points for a single user in parallel.
-        /// Uses computed properties from formalized response messages.
+        /// Reads a data type for all users in batches, returning a dictionary keyed by 1-based user index.
         /// </summary>
-        private async Task<(Models.PanelUserState state, bool ok)> ReadSingleUserAsync(
-            string sessionId, int userIndex, Dictionary<int, string> labels, CancellationToken ct)
+        private async Task<Dictionary<int, T>> ReadBatchedAsync<TResp, T>(
+            string sessionId,
+            int totalUsers,
+            int batchSize,
+            Func<int, int, IMessageData> createRequest,
+            Func<TResp, T[]> extractItems,
+            CancellationToken ct)
+            where TResp : class, IMessageData
         {
-            var state = new Models.PanelUserState { UserIndex = userIndex };
+            var result = new Dictionary<int, T>(totalUsers);
 
-            // Apply label if available
-            if (labels.TryGetValue(userIndex, out var userLabel))
-                state.UserLabel = userLabel;
-
-            var codeTask = SendRequestAsync<AccessCodeReadResponse>(
-                sessionId,
-                new AccessCodeReadRequest { UserNumberStart = userIndex, NumberOfUsers = 1 },
-                ct);
-            var attrTask = SendRequestAsync<AccessCodeAttributeReadResponse>(
-                sessionId,
-                new AccessCodeAttributeReadRequest { AccessCodeStart = userIndex, AccessCodeCount = 1 },
-                ct);
-            var partTask = SendRequestAsync<AccessCodePartitionAssignmentReadResponse>(
-                sessionId,
-                new AccessCodePartitionAssignmentReadRequest { AccessCodeStart = userIndex, AccessCodeCount = 1 },
-                ct);
-            var confTask = SendRequestAsync<UserCodeConfigurationReadResponse>(
-                sessionId,
-                new UserCodeConfigurationReadRequest { UserNumberStart = userIndex, UserCodeCount = 1 },
-                ct);
-
-            await Task.WhenAll(codeTask, attrTask, partTask, confTask);
-
-            bool ok = true;
-
-            var accessCode = codeTask.Result;
-            if (accessCode == null)
+            for (int start = 1; start <= totalUsers; start += batchSize)
             {
-                ok = false;
-            }
-            else
-            {
-                state.CodeValue = accessCode.AccessCodes.FirstOrDefault();
-                state.CodeLength = state.CodeValue?.Length;
+                int count = Math.Min(batchSize, totalUsers - start + 1);
+                var response = await SendRequestAsync<TResp>(sessionId, createRequest(start, count), ct);
+                if (response == null)
+                {
+                    _logger.LogWarning("Batch {Type} failed for range {Start}–{End}",
+                        typeof(TResp).Name, start, start + count - 1);
+                    continue;
+                }
+
+                var items = extractItems(response);
+                for (int i = 0; i < items.Length && start + i <= totalUsers; i++)
+                    result[start + i] = items[i];
             }
 
-            var attr = attrTask.Result;
-            if (attr != null)
-            {
-                state.Attributes = attr.Attributes;
-                state.IsActive = state.Attributes != PanelUserAttributes.None;
-            }
-
-            var partitions = partTask.Result;
-            if (partitions != null)
-            {
-                state.Partitions = partitions.AssignedPartitions;
-            }
-
-            var config = confTask.Result;
-            if (config != null)
-            {
-                state.HasProximityTag = config.CodeType.Contains(UserCodeConfigurationReadResponse.UserCodeType.ProximityTag);
-            }
-
-            state.LastUpdated = DateTime.UtcNow;
-            return (state, ok);
+            return result;
         }
 
         // ── Programming mode management ──────────────────────────────────
