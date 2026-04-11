@@ -6,6 +6,7 @@ using DSC.TLink.ITv2.Messages;
 using MediatR;
 using Microsoft.Extensions.Options;
 using NeoHub.Services.Settings;
+using static DSC.TLink.ITv2.Messages.AccessCodeAttributeReadResponse;
 
 namespace NeoHub.Services
 {
@@ -230,15 +231,15 @@ namespace NeoHub.Services
                 ct);
             var attrTask = SendRequestAsync<AccessCodeAttributeReadResponse>(
                 sessionId,
-                new AccessCodeAttributeReadRequest { UserNumberStart = userIndex, NumberOfUsers = 1 },
+                new AccessCodeAttributeReadRequest { AccessCodeStart = userIndex, AccessCodeCount = 1 },
                 ct);
             var partTask = SendRequestAsync<AccessCodePartitionAssignmentReadResponse>(
                 sessionId,
-                new AccessCodePartitionAssignmentReadRequest { UserNumberStart = userIndex, NumberOfUsers = 1 },
+                new AccessCodePartitionAssignmentReadRequest { AccessCodeStart = userIndex, AccessCodeCount = 1 },
                 ct);
             var confTask = SendRequestAsync<UserCodeConfigurationReadResponse>(
                 sessionId,
-                new UserCodeConfigurationReadRequest { UserNumberStart = userIndex, NumberOfUsers = 1 },
+                new UserCodeConfigurationReadRequest { UserNumberStart = userIndex, UserCodeCount = 1 },
                 ct);
 
             await Task.WhenAll(codeTask, attrTask, partTask, confTask);
@@ -252,15 +253,15 @@ namespace NeoHub.Services
             }
             else
             {
-                state.CodeValue = accessCode.PinCode;
+                state.CodeValue = accessCode.AccessCodes.FirstOrDefault();
                 state.CodeLength = state.CodeValue?.Length;
             }
 
             var attr = attrTask.Result;
             if (attr != null)
             {
-                state.Attributes = (Models.PanelUserAttributes)attr.AttributeFlags;
-                state.IsActive = state.Attributes != Models.PanelUserAttributes.None;
+                state.Attributes = attr.Attributes;
+                state.IsActive = state.Attributes != PanelUserAttributes.None;
             }
 
             var partitions = partTask.Result;
@@ -272,7 +273,7 @@ namespace NeoHub.Services
             var config = confTask.Result;
             if (config != null)
             {
-                state.HasProximityTag = config.HasProximityTag;
+                state.HasProximityTag = config.CodeType.Contains(UserCodeConfigurationReadResponse.UserCodeType.ProximityTag);
             }
 
             state.LastUpdated = DateTime.UtcNow;

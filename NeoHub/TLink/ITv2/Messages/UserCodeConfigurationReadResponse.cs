@@ -10,25 +10,21 @@ namespace DSC.TLink.ITv2.Messages
     [ITv2Command(ITv2Command.Response_User_Code_Configuration)]
     public record UserCodeConfigurationReadResponse : IMessageData
     {
-        public byte NumberOfRecords { get; init; }
-        public byte UserNumber { get; init; }
-        public byte Reserved1 { get; init; }
-        public byte Reserved2 { get; init; }
+        [CompactInteger]
+        public int UserCodeStart { get; init; }
+        [CompactInteger]
+        public int UserCodeCount { get; init; }
 
         /// <summary>
         /// Length prefix for the data section (always 1).
         /// </summary>
-        public byte DataLength { get; init; }
-
-        /// <summary>
-        /// Code type byte. 0x00=none, 0x01=PIN, 0x02=proximity tag.
-        /// </summary>
-        public byte CodeType { get; init; }
-
-        /// <summary>
-        /// Whether this user has a proximity tag (code type 0x02).
-        /// </summary>
-        [IgnoreProperty]
-        public bool HasProximityTag => CodeType == 0x02;
+        public byte DataWidth { get; init; }
+        public UserCodeType[] CodeType { get; init; } = Array.Empty<UserCodeType>();
+        public enum UserCodeType : byte
+        {
+            None = 0x00,
+            Pin = 0x01,
+            ProximityTag = 0x02
+        }
     }
 }

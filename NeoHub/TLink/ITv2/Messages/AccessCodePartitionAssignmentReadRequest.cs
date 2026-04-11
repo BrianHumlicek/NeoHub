@@ -12,9 +12,9 @@ namespace DSC.TLink.ITv2.Messages
     public record AccessCodePartitionAssignmentReadRequest : CommandMessageBase
     {
         [CompactInteger]
-        public int UserNumberStart { get; init; }
+        public int AccessCodeStart { get; init; }
         
         [CompactInteger]
-        public int NumberOfUsers { get; init; }
+        public int AccessCodeCount { get; init; }
     }
 }

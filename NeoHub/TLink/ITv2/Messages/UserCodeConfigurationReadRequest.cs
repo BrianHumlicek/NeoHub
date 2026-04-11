@@ -12,9 +12,9 @@ namespace DSC.TLink.ITv2.Messages
     public record UserCodeConfigurationReadRequest : CommandMessageBase
     {
         [CompactInteger]
-        public int UserNumberStart { get; init; }
+        public int UserCodeStart { get; init; }
         
         [CompactInteger]
-        public int NumberOfUsers { get; init; }
+        public int UserCodeCount { get; init; }
     }
 }

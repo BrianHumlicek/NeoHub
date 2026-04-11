@@ -1,3 +1,5 @@
+using static DSC.TLink.ITv2.Messages.AccessCodeAttributeReadResponse;
+
 namespace NeoHub.Services.Models
 {
     /// <summary>

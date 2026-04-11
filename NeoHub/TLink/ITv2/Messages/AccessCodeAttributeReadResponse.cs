@@ -1,4 +1,5 @@
 using DSC.TLink.ITv2.Enumerations;
+using DSC.TLink.Serialization;
 
 namespace DSC.TLink.ITv2.Messages
 {
@@ -9,21 +10,24 @@ namespace DSC.TLink.ITv2.Messages
     [ITv2Command(ITv2Command.Response_Access_Code_Attribute)]
     public record AccessCodeAttributeReadResponse : IMessageData
     {
-        public byte NumberOfRecords { get; init; }
-        public byte UserNumber { get; init; }
-        public byte Reserved1 { get; init; }
-        public byte Reserved2 { get; init; }
+        [CompactInteger]
+        public int AccessCodeStart { get; init; }
+        [CompactInteger]
+        public int AccessCodeCount { get; init; }
+        public byte DataWidth { get; init; }    //Should always be 1
+        public PanelUserAttributes[] Attributes { get; init; } = Array.Empty<PanelUserAttributes>();
+        [Flags]
+        public enum PanelUserAttributes : byte
+        {
+            None = 0x00,
+            Supervisor = 0x01,  // Bit 0 — user has supervisor privileges
+            DuressCode = 0x02,  // Bit 1 — code triggers silent duress alarm
+            CanBypassZone = 0x04,  // Bit 2 — user can bypass zones
+            RemoteAccess = 0x08,  // Bit 3 — user can arm/disarm remotely
+                                  // Bits 4-5 unused/unknown
+            BellSquawk = 0x40,  // Bit 6 — audible confirmation on arm/disarm
+            OneTimeUse = 0x80,  // Bit 7 — code is single-use (auto-deleted after use)
+        }
 
-        /// <summary>
-        /// Length prefix for the data section (always 1).
-        /// </summary>
-        public byte DataLength { get; init; }
-
-        /// <summary>
-        /// Attribute flags byte. 0x00 = empty/disabled user.
-        /// Bit 0 = Supervisor, Bit 1 = DuressCode, Bit 2 = CanBypassZone,
-        /// Bit 3 = RemoteAccess, Bit 6 = BellSquawk, Bit 7 = OneTimeUse.
-        /// </summary>
-        public byte AttributeFlags { get; init; }
     }
 }

@@ -10,10 +10,11 @@ namespace DSC.TLink.ITv2.Messages
     [ITv2Command(ITv2Command.Response_Access_Code_Partition_Assignment)]
     public record AccessCodePartitionAssignmentReadResponse : IMessageData
     {
-        public byte NumberOfRecords { get; init; }
-        public byte UserNumber { get; init; }
-        public byte Reserved1 { get; init; }
-        public byte Reserved2 { get; init; }
+        [CompactInteger]
+        public int AccessCodeStart { get; init; }
+
+        [CompactInteger]
+        public int AccessCodeCount { get; init; }
 
         /// <summary>
         /// Partition assignment bitmask bytes (length-prefixed on wire).
