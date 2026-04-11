@@ -32,6 +32,7 @@ namespace DSC.TLink.Serialization
         EnumArrayLeadingLength,
         EnumArrayUnbounded,
         EmbeddedMessage,
+        LeadingLengthBCDStringArray,
     }
 
     internal enum DateTimeFormatType

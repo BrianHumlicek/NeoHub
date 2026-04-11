@@ -115,6 +115,10 @@ namespace DSC.TLink.Serialization
                         StringSerializer.WriteBCDStringPrefixed(bytes, pp.Property.Name, (string?)pp.Property.GetValue(instance));
                         break;
 
+                    case SerializerKind.LeadingLengthBCDStringArray:
+                        StringSerializer.WriteBCDStringArrayPrefixed(bytes, pp.Property.Name, (string[]?)pp.Property.GetValue(instance));
+                        break;
+
                     case SerializerKind.ByteArrayFixed:
                         ByteArraySerializer.WriteFixedArray(bytes, (byte[]?)pp.Property.GetValue(instance), pp.FixedLength);
                         break;
@@ -219,6 +223,10 @@ namespace DSC.TLink.Serialization
                         pp.Property.SetValue(instance, StringSerializer.ReadBCDString(bytes, ref offset, pp.Property.Name, bcdLen));
                         break;
                     }
+
+                    case SerializerKind.LeadingLengthBCDStringArray:
+                        pp.Property.SetValue(instance, StringSerializer.ReadBCDStringArray(bytes, ref offset, pp.Property.Name));
+                        break;
 
                     case SerializerKind.ByteArrayFixed:
                         pp.Property.SetValue(instance, ByteArraySerializer.ReadFixedArray(bytes, ref offset, pp.Property.Name, pp.FixedLength));
@@ -489,6 +497,15 @@ namespace DSC.TLink.Serialization
 
                 if (elementType == typeof(string))
                 {
+                    if (property.IsDefined(typeof(LeadingLengthBCDStringAttribute), false))
+                    {
+                        return new PropertyPlan
+                        {
+                            Property = property,
+                            Kind = SerializerKind.LeadingLengthBCDStringArray,
+                        };
+                    }
+
                     if (property.IsDefined(typeof(FixedLengthUnicodeStringArrayAttribute), false))
                     {
                         return new PropertyPlan

@@ -163,6 +163,42 @@ namespace DSC.TLink.Serialization
             WriteBCDStringFixed(bytes, digits, bcdLength);
         }
 
+        internal static void WriteBCDStringArrayPrefixed(List<byte> bytes, string propertyName, string[]? strings)
+        {
+            strings ??= Array.Empty<string>();
+            if (strings.Length == 0)
+            {
+                bytes.Add(0);
+                return;
+            }
+
+            int maxDigits = strings.Max(s => (s ?? string.Empty).Length);
+            int bcdLength = (maxDigits + 1) / 2;
+            if (bcdLength > 255)
+                throw new InvalidOperationException(
+                    $"Property '{propertyName}' BCD element byte count {bcdLength} exceeds 1-byte prefix max (255).");
+
+            bytes.Add((byte)bcdLength);
+            foreach (var s in strings)
+                WriteBCDStringFixed(bytes, s, bcdLength);
+        }
+
+        internal static string[] ReadBCDStringArray(ReadOnlySpan<byte> bytes, ref int offset, string propertyName)
+        {
+            if (offset >= bytes.Length)
+                throw new InvalidOperationException(
+                    $"Not enough bytes to read BCD array length prefix for '{propertyName}'");
+
+            int bcdLen = bytes[offset++];
+            if (bcdLen == 0)
+                return Array.Empty<string>();
+
+            var list = new List<string>();
+            while (offset + bcdLen <= bytes.Length)
+                list.Add(ReadBCDString(bytes, ref offset, propertyName, bcdLen));
+            return list.ToArray();
+        }
+
         internal static string ReadBCDString(ReadOnlySpan<byte> bytes, ref int offset, string propertyName, int fixedLength)
         {
             if (offset + fixedLength > bytes.Length)
