@@ -63,6 +63,7 @@ namespace DSC.TLink.ITv2.Enumerations
 		Notification_Partition_Banner_Notification = 581, // 0x0245
 		Notification_Partition_Buzzer_Type_Extended = 582, // 0x0246
 		Notification_Buffer_Overload = 752, // 0x02F0
+        Notification_Access_Code_Update = 592, // 0x250
 		Upgrade_Firmware_Available = 768, // 0x0300
 		Upgrade_Start_Download = 769, // 0x0301
 		Upgrade_Cancel_Download = 770, // 0x0302
