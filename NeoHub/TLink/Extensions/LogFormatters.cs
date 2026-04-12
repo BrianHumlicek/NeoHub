@@ -169,6 +169,7 @@ public readonly struct MessageLog
 
         foreach (var prop in properties)
         {
+            if (prop.GetIndexParameters().Length > 0) continue;
             var value = prop.GetValue(obj);
             var formatted = FormatValue(value, indentLevel);
             sb.Append($"{indent}{prop.Name} = {formatted}");
