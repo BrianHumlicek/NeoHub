@@ -2,12 +2,13 @@
 @using NeoHub.Services
 @using NeoHub.Services.Models
 @using DSC.TLink.ITv2.MediatR
-@using static DSC.TLink.ITv2.Messages.AccessCodeAttributeReadResponse
+@using DSC.TLink.ITv2.Enumerations
 @inject IPanelUserService UserService
 @inject IPanelStateService PanelState
 @inject IITv2SessionManager SessionManager
 @inject ISessionMonitor SessionMonitor
 @inject ISnackbar Snackbar
+@inject IDialogService DialogService
 @implements IDisposable
 
 <PageTitle>Panel Users</PageTitle>
@@ -110,7 +111,7 @@
                         }
                         @foreach (var item in GetFilteredUsers())
                         {
-                            <tr style="@(item.IsActive ? "" : "opacity: 0.4;")">
+                            <tr style="@(item.IsActive ? "" : "opacity: 0.4;") cursor: pointer;" @onclick="() => EditUserAsync(item)">
                                 <td><strong>@item.UserIndex</strong></td>
                                 <td>@GetUserStatusChip(item)</td>
                                 <td>@(string.IsNullOrWhiteSpace(item.DisplayLabel) ? "—" : item.DisplayLabel)</td>
@@ -171,6 +172,8 @@
     private bool _showInactive;
     private PanelUserReadResult? _lastResult;
     private bool _disposed;
+    private bool _renderDirty;
+    private Timer? _renderTimer;
 
     /// <summary>
     /// True if a read is in progress (local or background). Survives page refresh.
@@ -182,16 +185,24 @@
         RefreshSession();
         SessionMonitor.SessionsChanged += OnSessionsChanged;
         PanelState.SessionStateChanged += OnSessionStateChanged;
+
+        _renderTimer = new Timer(_ => InvokeAsync(() =>
+        {
+            if (_disposed || !_renderDirty) return;
+            try
+            {
+                _renderDirty = false;
+                _session = _sessionId is null ? null : PanelState.GetSession(_sessionId);
+                StateHasChanged();
+            }
+            catch (ObjectDisposedException) { }
+        }), null, 200, 200);
     }
 
     private void OnSessionsChanged()
     {
-        InvokeAsync(() =>
-        {
-            if (_disposed) return;
-            RefreshSession();
-            StateHasChanged();
-        });
+        RefreshSession();
+        _renderDirty = true;
     }
 
     private void OnSessionStateChanged(object? sender, SessionStateChangedEventArgs e)
@@ -199,12 +210,7 @@
         if (_sessionId == null || !string.Equals(_sessionId, e.SessionId, StringComparison.OrdinalIgnoreCase))
             return;
 
-        InvokeAsync(() =>
-        {
-            if (_disposed) return;
-            _session = PanelState.GetSession(_sessionId);
-            StateHasChanged();
-        });
+        _renderDirty = true;
     }
 
     private void RefreshSession()
@@ -238,6 +244,28 @@
         finally
         {
             _localReading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task EditUserAsync(PanelUserState user)
+    {
+        if (_sessionId is null) return;
+
+        var statusText = user.IsActive ? (user.UserIndex == 1 ? " — Master" : " — Active") : " — Empty";
+
+        var parameters = new DialogParameters<UserEditDialog>
+        {
+            { x => x.User, user },
+            { x => x.SessionId, _sessionId },
+            { x => x.MaxPartitions, _session?.MaxPartitions ?? 2 }
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true };
+        var dialog = await DialogService.ShowAsync<UserEditDialog>($"User {user.UserIndex}{statusText}", parameters, options);
+        var result = await dialog.Result;
+        if (result?.Canceled == false)
+        {
+            _session = PanelState.GetSession(_sessionId);
             StateHasChanged();
         }
     }
@@ -313,6 +341,7 @@
     public void Dispose()
     {
         _disposed = true;
+        _renderTimer?.Dispose();
         SessionMonitor.SessionsChanged -= OnSessionsChanged;
         PanelState.SessionStateChanged -= OnSessionStateChanged;
     }

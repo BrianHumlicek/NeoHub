@@ -6,8 +6,6 @@ using DSC.TLink.ITv2.Messages;
 using MediatR;
 using Microsoft.Extensions.Options;
 using NeoHub.Services.Settings;
-using static DSC.TLink.ITv2.Messages.AccessCodeAttributeReadResponse;
-using static DSC.TLink.ITv2.Messages.UserCodeConfigurationReadResponse;
 
 namespace NeoHub.Services
 {
@@ -81,7 +79,7 @@ namespace NeoHub.Services
 
                 // 2. Enter programming mode for access code commands
                 UpdateProgress(session, sessionId, "Entering programming mode…");
-                if (!await EnterAccessCodeModeAsync(sessionId, masterCode, ct))
+                if (!await EnterProgrammingModeAsync(sessionId, ProgrammingMode.AccessCodeProgramming, masterCode, readWrite: false, ct))
                     return new PanelUserReadResult(false, "Failed to enter programming mode");
 
                 PanelUserReadResult result;
@@ -105,6 +103,112 @@ namespace NeoHub.Services
                 session.UserReadTotal = 0;
                 _panelState.UpdateSession(sessionId, _ => { });
             }
+        }
+
+
+        public async Task<PanelUserWriteResult> WriteUserAsync(
+            string sessionId, Models.PanelUserState user, Models.PanelUserState original, CancellationToken ct)
+        {
+            var masterCode = _appSettings.CurrentValue.DefaultAccessCode;
+            if (string.IsNullOrWhiteSpace(masterCode))
+                return new PanelUserWriteResult(false, "Master code (DefaultAccessCode) not configured");
+
+            if (!await EnterProgrammingModeAsync(sessionId, ProgrammingMode.AccessCodeProgramming, masterCode, readWrite: true, ct))
+                return new PanelUserWriteResult(false, "Failed to enter programming mode");
+
+            try
+            {
+                var errors = new List<string>();
+                int idx = user.UserIndex;
+
+                if (user.CodeValue != original.CodeValue)
+                {
+                    if (!await SendCommandAsync(sessionId, new AccessCodeWrite
+                    {
+                        AccessCodeStart = idx,
+                        AccessCodeCount = 1,
+                        AccessCodes = [user.CodeValue ?? ""]
+                    }, ct))
+                        errors.Add("Access code");
+                }
+
+                if (user.Attributes != original.Attributes)
+                {
+                    if (!await SendCommandAsync(sessionId, new AccessCodeAttributeWrite
+                    {
+                        AccessCodeStart = idx,
+                        AccessCodeCount = 1,
+                        DataWidth = 1,
+                        Attributes = [user.Attributes]
+                    }, ct))
+                        errors.Add("Attributes");
+                }
+
+                if (!user.Partitions.SequenceEqual(original.Partitions))
+                {
+                    int maxPartitions = _panelState.GetSession(sessionId)?.MaxPartitions ?? 8;
+                    int dataWidth = Math.Max(1, (maxPartitions + 7) / 8);
+                    var bitmask = new byte[dataWidth];
+                    foreach (var p in user.Partitions)
+                    {
+                        int byteIndex = (p - 1) / 8;
+                        int bitIndex = (p - 1) % 8;
+                        if (byteIndex < bitmask.Length)
+                            bitmask[byteIndex] |= (byte)(1 << bitIndex);
+                    }
+
+                    if (!await SendCommandAsync(sessionId, new AccessCodePartitionAssignmentWrite
+                    {
+                        AccessCodeStart = idx,
+                        AccessCodeCount = 1,
+                        DataWidth = (byte)dataWidth,
+                        PartitionBitmask = bitmask
+                    }, ct))
+                        errors.Add("Partition assignments");
+                }
+
+                if (user.UserLabel != original.UserLabel)
+                {
+                    if (!await SendCommandAsync(sessionId, new AccessCodeLabelWrite
+                    {
+                        AccessCodeStart = idx,
+                        AccessCodeCount = 1,
+                        AccessCodeLabels = [user.UserLabel ?? ""]
+                    }, ct))
+                        errors.Add("Label");
+                }
+
+                if (errors.Count > 0)
+                    return new PanelUserWriteResult(false, $"Failed to write: {string.Join(", ", errors)}");
+
+                var session = _panelState.GetSession(sessionId);
+                if (session != null)
+                {
+                    user.LastUpdated = DateTime.UtcNow;
+                    session.Users[idx] = user;
+                    _panelState.UpdateSession(sessionId, _ => { });
+                }
+
+                return new PanelUserWriteResult(true);
+            }
+            finally
+            {
+                await ExitConfigModeAsync(sessionId, ct);
+            }
+        }
+
+        private async Task<bool> SendCommandAsync(string sessionId, IMessageData command, CancellationToken ct)
+        {
+            var response = await _mediator.Send(new SessionCommand
+            {
+                SessionID = sessionId,
+                MessageData = command
+            }, ct);
+
+            if (!response.Success)
+                _logger.LogWarning("Write command {Command} failed: {Error}", command.GetType().Name, response.ErrorMessage);
+
+            return response.Success;
         }
 
         // ── Progress reporting ────────────────────────────────────────────
@@ -214,7 +318,7 @@ namespace NeoHub.Services
                 r => r.PartitionAssignments,
                 ct);
 
-            var confsTask = ReadBatchedAsync<UserCodeConfigurationReadResponse, UserCodeType>(
+            var confsTask = ReadBatchedAsync<UserCodeConfigurationReadResponse, UserCodeConfigurationReadResponse.UserCodeType>(
                 sessionId, maxUsers,
                 MaxRecordsPerBatch(bytesPerRecord: 1),
                 (start, count) => new UserCodeConfigurationReadRequest { UserCodeStart = start, UserCodeCount = count },
@@ -258,7 +362,7 @@ namespace NeoHub.Services
                     state.Partitions = partList;
 
                 if (confs.TryGetValue(i, out var codeType))
-                    state.HasProximityTag = codeType == UserCodeType.ProximityTag;
+                    state.HasProximityTag = codeType == UserCodeConfigurationReadResponse.UserCodeType.ProximityTag;
 
                 state.LastUpdated = DateTime.UtcNow;
                 session.Users[i] = state;
@@ -325,10 +429,11 @@ namespace NeoHub.Services
         // ── Programming mode management ──────────────────────────────────
 
         /// <summary>
-        /// Enters AccessCodeProgramming mode using the master code,
+        /// Enters a programming mode with the given code,
         /// then waits for the panel to confirm via LeadIn notification.
         /// </summary>
-        private async Task<bool> EnterAccessCodeModeAsync(string sessionId, string masterCode, CancellationToken ct)
+        private async Task<bool> EnterProgrammingModeAsync(
+            string sessionId, ProgrammingMode mode, string accessCode, bool readWrite, CancellationToken ct)
         {
             var session = _panelState.GetSession(sessionId);
             if (session == null)
@@ -337,13 +442,12 @@ namespace NeoHub.Services
             // If panel is already in programming mode, exit first to avoid "partition busy"
             if (session.IsInProgrammingMode)
             {
-                _logger.LogDebug("Panel already in programming mode, exiting first before user read");
+                _logger.LogDebug("Panel already in programming mode, exiting first");
                 await ExitConfigModeAsync(sessionId, ct);
-                // Brief pause to let panel process the exit
                 await Task.Delay(500, ct);
             }
 
-            _logger.LogInformation("Entering AccessCodeProgramming mode");
+            _logger.LogInformation("Entering {Mode} mode", mode);
 
             var enterResponse = await _mediator.Send(new SessionCommand
             {
@@ -351,15 +455,15 @@ namespace NeoHub.Services
                 MessageData = new ConfigurationEnter
                 {
                     Partition = 1,
-                    ProgrammingMode = ProgrammingMode.AccessCodeProgramming,
-                    AccessCode = masterCode,
-                    ReadWrite = ConfigurationEnter.ReadWriteAccessEnum.ReadOnlyMode
+                    ProgrammingMode = mode,
+                    AccessCode = accessCode,
+                    ReadWrite = readWrite ? ConfigurationEnter.ReadWriteAccessEnum.ReadWriteMode : ConfigurationEnter.ReadWriteAccessEnum.ReadOnlyMode
                 }
             }, ct);
 
             if (!enterResponse.Success)
             {
-                _logger.LogWarning("Failed to enter Access Code Programming mode: {Error}", enterResponse.ErrorMessage);
+                _logger.LogWarning("Failed to enter {Mode} mode: {Error}", mode, enterResponse.ErrorMessage);
                 return false;
             }
 
@@ -381,7 +485,7 @@ namespace NeoHub.Services
                 return false;
             }
 
-            _logger.LogInformation("Panel confirmed AccessCodeProgramming mode");
+            _logger.LogInformation("Panel confirmed {Mode} mode", mode);
             return true;
         }
 

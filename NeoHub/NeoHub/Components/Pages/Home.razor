@@ -279,6 +279,7 @@
 	private Timer? _clockTimer;
 
 	private bool _disposed;
+	private bool _renderDirty;
 
 	protected override void OnInitialized()
 	{
@@ -291,37 +292,23 @@
 		_clockTimer = new Timer(_ => InvokeAsync(() =>
 		{
 			if (_disposed) return;
-			try { StateHasChanged(); }
+			try
+			{
+				if (_renderDirty) { RefreshSessions(); _renderDirty = false; }
+				StateHasChanged();
+			}
 			catch (ObjectDisposedException) { }
 		}), null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
 	}
 
 	private void OnSessionsChanged()
 	{
-		InvokeAsync(() =>
-		{
-			if (_disposed) return;
-			try
-			{
-				RefreshSessions();
-				StateHasChanged();
-			}
-			catch (ObjectDisposedException) { }
-		});
+		_renderDirty = true;
 	}
 
 	private void OnStateChanged(object? sender, EventArgs e)
 	{
-		InvokeAsync(() =>
-		{
-			if (_disposed) return;
-			try
-			{
-				RefreshSessions();
-				StateHasChanged();
-			}
-			catch (ObjectDisposedException) { }
-		});
+		_renderDirty = true;
 	}
 
 	private void RefreshSessions()

@@ -188,8 +188,8 @@
     private bool _tlinkOnly = true;
     private bool _autoScroll = true;
     private bool _disposed;
-    private bool _logDirty;
-    private Timer? _logRenderTimer;
+    private bool _renderDirty;
+    private Timer? _renderTimer;
 
     private static readonly IReadOnlyList<MessageTypeInfo> _catalog = MessageCatalog.GetSendable();
 
@@ -202,15 +202,16 @@
         foreach (var entry in LogService.GetLogs().TakeLast(200))
             _rawLogEntries.Add(entry);
 
-        // Periodic render for log updates — avoids per-entry StateHasChanged()
-        // which can overwhelm the renderer during startup bursts and race with
+        // Periodic render for external event updates (log entries, session changes).
+        // Coalesces rapid-fire events into a single StateHasChanged() call and avoids
+        // calling StateHasChanged() directly from event callbacks, which races with
         // circuit teardown on browser refresh.
-        _logRenderTimer = new Timer(_ => InvokeAsync(() =>
+        _renderTimer = new Timer(_ => InvokeAsync(() =>
         {
-            if (_disposed || !_logDirty) return;
+            if (_disposed || !_renderDirty) return;
             try
             {
-                _logDirty = false;
+                _renderDirty = false;
                 StateHasChanged();
             }
             catch (ObjectDisposedException) { }
@@ -243,7 +244,7 @@
             try
             {
                 RefreshSessions();
-                StateHasChanged();
+                _renderDirty = true;
             }
             catch (ObjectDisposedException) { }
         });
@@ -259,7 +260,7 @@
                 _rawLogEntries.Add(entry);
                 if (_rawLogEntries.Count > 300)
                     _rawLogEntries.RemoveAt(0);
-                _logDirty = true;
+                _renderDirty = true;
             }
             catch (ObjectDisposedException) { }
         });
@@ -602,7 +603,7 @@
     public void Dispose()
     {
         _disposed = true;
-        _logRenderTimer?.Dispose();
+        _renderTimer?.Dispose();
         SessionMonitor.SessionsChanged -= OnSessionsChanged;
         LogService.LogReceived -= OnLogReceived;
     }

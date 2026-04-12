@@ -1,0 +1,204 @@
+@using NeoHub.Services
+@using NeoHub.Services.Models
+@using DSC.TLink.ITv2.Enumerations
+@inject IPanelUserService UserService
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="4">
+            @* ── User Label ── *@
+            <MudTextField T="string" @bind-Value="_label" Label="User Label"
+                          Variant="Variant.Outlined" MaxLength="14" />
+
+            @* ── Access Code ── *@
+            <MudTextField T="string" @bind-Value="_code" Label="Access Code"
+                          Variant="Variant.Outlined"
+                          InputType="@(_revealCode ? InputType.Text : InputType.Password)"
+                          Adornment="Adornment.End"
+                          AdornmentIcon="@(_revealCode ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                          OnAdornmentClick="() => _revealCode = !_revealCode"
+                          Style="font-family: 'Courier New', monospace;" />
+
+            @* ── Attributes ── *@
+            <MudText Typo="Typo.subtitle2">Attributes</MudText>
+            <MudStack Row="true" Spacing="4" Wrap="Wrap.Wrap">
+                @foreach (var (flag, name) in AttributeFlags)
+                {
+                    var f = flag;
+                    <MudCheckBox T="bool"
+                                 Value="@_attributes.HasFlag(f)"
+                                 ValueChanged="@(v => ToggleAttribute(f, v))"
+                                 Label="@name"
+                                 Dense="true" />
+                }
+            </MudStack>
+
+            @* ── Code Configuration (read-only) ── *@
+            <MudText Typo="Typo.subtitle2">Code Configuration</MudText>
+            <MudStack Row="true" Spacing="4">
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                         Color="@(User.HasProximityTag ? Color.Info : Color.Default)">
+                    @(User.HasProximityTag ? "Proximity Tag" : "PIN Only")
+                </MudChip>
+                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="align-self-center">
+                    (read-only)
+                </MudText>
+            </MudStack>
+
+            @* ── Partition Assignments ── *@
+            <MudText Typo="Typo.subtitle2">Partition Assignments</MudText>
+            <MudStack Row="true" Spacing="2">
+                @for (int p = 0; p < _partitionAssigned.Length; p++)
+                {
+                    var idx = p;
+                    <MudCheckBox T="bool"
+                                 @bind-Value="_partitionAssigned[idx]"
+                                 Label="@($"P{idx + 1}")"
+                                 Dense="true" />
+                }
+            </MudStack>
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync" Disabled="_saving">
+            @if (_saving)
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+            }
+            Save
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter]
+    public PanelUserState User { get; set; } = null!;
+
+    [Parameter]
+    public string SessionId { get; set; } = null!;
+
+    [Parameter]
+    public int MaxPartitions { get; set; }
+
+    private string _label = "";
+    private string _code = "";
+    private PanelUserAttributes _attributes;
+    private bool[] _partitionAssigned = [];
+    private bool _revealCode;
+    private bool _saving;
+
+    // Snapshots for dirty-check write
+    private string _origLabel = "";
+    private string _origCode = "";
+    private PanelUserAttributes _origAttributes;
+    private bool[] _origPartitionAssigned = [];
+
+    private static readonly (PanelUserAttributes flag, string name)[] AttributeFlags =
+    [
+        (PanelUserAttributes.Supervisor,    "Supervisor"),
+        (PanelUserAttributes.DuressCode,    "Duress Code"),
+        (PanelUserAttributes.CanBypassZone, "Can Bypass Zone"),
+        (PanelUserAttributes.RemoteAccess,  "Remote Access"),
+        (PanelUserAttributes.BellSquawk,    "Bell Squawk"),
+        (PanelUserAttributes.OneTimeUse,    "One-Time Use"),
+    ];
+
+    protected override void OnParametersSet()
+    {
+        _label = User.UserLabel ?? "";
+        _code = User.CodeValue ?? "";
+        _attributes = User.Attributes;
+
+        _partitionAssigned = new bool[MaxPartitions];
+        foreach (var p in User.Partitions)
+        {
+            if (p >= 1 && p <= MaxPartitions)
+                _partitionAssigned[p - 1] = true;
+        }
+
+        // Snapshot for dirty checking
+        _origLabel = _label;
+        _origCode = _code;
+        _origAttributes = _attributes;
+        _origPartitionAssigned = _partitionAssigned.ToArray();
+    }
+
+    private void ToggleAttribute(PanelUserAttributes flag, bool set) =>
+        _attributes = set ? _attributes | flag : _attributes & ~flag;
+
+    private async Task SaveAsync()
+    {
+        _saving = true;
+        StateHasChanged();
+
+        try
+        {
+            var trimmedLabel = string.IsNullOrWhiteSpace(_label) ? null : _label.Trim();
+            var origTrimmedLabel = string.IsNullOrWhiteSpace(_origLabel) ? null : _origLabel.Trim();
+
+            var edited = new PanelUserState
+            {
+                UserIndex = User.UserIndex,
+                UserLabel = trimmedLabel,
+                CodeValue = _code,
+                CodeLength = _code?.Length,
+                Attributes = _attributes,
+                Partitions = BuildPartitionList(),
+                IsActive = _attributes != PanelUserAttributes.None || !string.IsNullOrEmpty(_code),
+                HasProximityTag = User.HasProximityTag,
+            };
+
+            var original = new PanelUserState
+            {
+                UserIndex = User.UserIndex,
+                UserLabel = origTrimmedLabel,
+                CodeValue = _origCode,
+                CodeLength = _origCode?.Length,
+                Attributes = _origAttributes,
+                Partitions = BuildPartitionList(_origPartitionAssigned),
+                IsActive = User.IsActive,
+                HasProximityTag = User.HasProximityTag,
+            };
+
+            var result = await UserService.WriteUserAsync(SessionId, edited, original, CancellationToken.None);
+
+            if (result.Success)
+            {
+                Snackbar.Add($"User {User.UserIndex} saved", Severity.Success);
+                MudDialog.Close(DialogResult.Ok(true));
+            }
+            else
+            {
+                Snackbar.Add($"Save failed: {result.ErrorMessage}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+            StateHasChanged();
+        }
+    }
+
+    private List<byte> BuildPartitionList(bool[]? assignments = null)
+    {
+        assignments ??= _partitionAssigned;
+        var list = new List<byte>();
+        for (int i = 0; i < assignments.Length; i++)
+        {
+            if (assignments[i])
+                list.Add((byte)(i + 1));
+        }
+        return list;
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}
