@@ -1,14 +1,10 @@
-using DSC.TLink.ITv2.Enumerations;
+﻿using DSC.TLink.ITv2.Enumerations;
 using DSC.TLink.Serialization;
 
 namespace DSC.TLink.ITv2.Messages
 {
-    /// <summary>
-    /// Response for 0x4737 Access Code Attribute Read.
-    /// Wire format: [NumberOfRecords:1] [UserNumber:1] [Reserved1:1] [Reserved2:1] [DataLength:1] [AttributeFlags:1]
-    /// </summary>
-    [ITv2Command(ITv2Command.Response_Access_Code_Attribute)]
-    public record AccessCodeAttributeReadResponse : IMessageData
+    [ITv2Command(ITv2Command.Configuration_Write_Access_Code_Attribute)]
+    public record AccessCodeAttributeWrite : CommandMessageBase
     {
         [CompactInteger]
         public int AccessCodeStart { get; init; }
