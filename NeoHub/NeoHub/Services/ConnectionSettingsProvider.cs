@@ -13,15 +13,18 @@ public class ConnectionSettingsProvider : IConnectionSettingsProvider
 {
     private readonly IOptionsMonitor<PanelConnectionsSettings> _settings;
     private readonly ISettingsPersistenceService _persistence;
+    private readonly ISessionMonitor _sessionMonitor;
     private readonly ILogger<ConnectionSettingsProvider> _logger;
 
     public ConnectionSettingsProvider(
         IOptionsMonitor<PanelConnectionsSettings> settings,
         ISettingsPersistenceService persistence,
+        ISessionMonitor sessionMonitor,
         ILogger<ConnectionSettingsProvider> logger)
     {
         _settings = settings;
         _persistence = persistence;
+        _sessionMonitor = sessionMonitor;
         _logger = logger;
     }
 
@@ -72,6 +75,7 @@ public class ConnectionSettingsProvider : IConnectionSettingsProvider
 
         _settings.CurrentValue.Connections.Add(placeholder);
         PersistSettingsAsync();
+        _sessionMonitor.NotifyChanged();
     }
 
     private async void PersistSettingsAsync()
