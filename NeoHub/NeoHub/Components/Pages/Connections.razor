@@ -207,6 +207,9 @@
 </MudContainer>
 
 @code {
+    [SupplyParameterFromQuery(Name = "expand")]
+    public string? ExpandSessionId { get; set; }
+
     private List<ConnectionSettings> connections = new();
     private HashSet<string> activeSessions = new();
     private HashSet<string> visibleFields = new();
@@ -219,6 +222,8 @@
     protected override void OnInitialized()
     {
         RefreshData();
+        if (!string.IsNullOrEmpty(ExpandSessionId))
+            expandedSettings = ExpandSessionId;
         SessionMonitor.SessionsChanged += OnSessionsChanged;
         PanelState.SessionStateChanged += OnStateChanged;
         UpdateRefreshTimer();
