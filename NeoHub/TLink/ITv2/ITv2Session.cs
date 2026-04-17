@@ -163,7 +163,7 @@ internal sealed class ITv2Session : IITv2Session
 
         SessionId = System.Text.Encoding.UTF8.GetString(_transport.DefaultHeader.Span);
         _sessionScope = _logger.BeginScope(ITv2ConnectionHandler.CreateLogScope(SessionId));
-        _logger.LogInformation("Connection from Integration Identification Number [851][422]");
+        _logger.LogInformation("Connection from Integration Identification Number {SessionId}", SessionId);
         OpenSession openSession = initialPacket.Message.As<OpenSession>();
 
         // Resolve per-connection settings now that we know the session ID and encryption type
