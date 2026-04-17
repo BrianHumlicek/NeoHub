@@ -52,19 +52,33 @@ public static class SettingsMigration
             if (root is not JsonObject rootObj)
                 return;
 
-            if (!rootObj.ContainsKey(LegacySectionName))
-                return;
+            var dirty = false;
 
-            var legacy = rootObj[LegacySectionName]?.AsObject();
-            if (legacy == null)
-                return;
+            // ── Migration 1: Legacy "DSC.TLink" flat format → PanelConnections + Application ──
+            if (rootObj.ContainsKey(LegacySectionName))
+            {
+                var legacy = rootObj[LegacySectionName]?.AsObject();
+                if (legacy != null)
+                {
+                    MigrateLegacySection(rootObj, legacy);
+                    dirty = true;
+                }
+            }
 
-            Migrate(rootObj, legacy);
+            // ── Migration 2: Move DefaultAccessCode / DefaultInstallerCode from Application → each connection ──
+            if (MigrateAccessCodesToConnections(rootObj))
+                dirty = true;
 
-            var options = new JsonSerializerOptions { WriteIndented = true };
-            File.WriteAllText(filePath, rootObj.ToJsonString(options));
+            // ── Migration 3: Rename DefaultInstallerCode → InstallerCode in connection entries ──
+            if (RenameConnectionCodeProperties(rootObj))
+                dirty = true;
 
-            Console.WriteLine($"[SettingsMigration] Migrated legacy \"{LegacySectionName}\" section in {filePath}");
+            if (dirty)
+            {
+                var options = new JsonSerializerOptions { WriteIndented = true };
+                File.WriteAllText(filePath, rootObj.ToJsonString(options));
+                Console.WriteLine($"[SettingsMigration] Migrated settings in {filePath}");
+            }
         }
         catch (Exception ex)
         {
@@ -74,7 +88,7 @@ public static class SettingsMigration
         }
     }
 
-    private static void Migrate(JsonObject root, JsonObject legacy)
+    private static void MigrateLegacySection(JsonObject root, JsonObject legacy)
     {
         // Build the connection entry from legacy fields
         var connection = new JsonObject();
@@ -118,6 +132,80 @@ public static class SettingsMigration
 
         // Remove legacy section
         root.Remove(LegacySectionName);
+    }
+
+    /// <summary>
+    /// Moves DefaultAccessCode and DefaultInstallerCode from the Application section
+    /// into each existing connection entry using the new property names.
+    /// Returns true if the file was modified.
+    /// </summary>
+    private static bool MigrateAccessCodesToConnections(JsonObject root)
+    {
+        var appSection = root[ApplicationSettings.SectionName]?.AsObject();
+        if (appSection is null)
+            return false;
+
+        var hasAccessCode = appSection.ContainsKey("DefaultAccessCode");
+        var hasInstallerCode = appSection.ContainsKey("DefaultInstallerCode");
+
+        if (!hasAccessCode && !hasInstallerCode)
+            return false;
+
+        var accessCode = hasAccessCode ? appSection["DefaultAccessCode"]?.DeepClone() : null;
+        var installerCode = hasInstallerCode ? appSection["DefaultInstallerCode"]?.DeepClone() : null;
+
+        // Apply to each existing connection using the new property names
+        var connections = root[PanelConnectionsSettings.SectionName]?["Connections"]?.AsArray();
+        if (connections is not null)
+        {
+            foreach (var connNode in connections)
+            {
+                if (connNode is not JsonObject conn)
+                    continue;
+
+                if (accessCode is not null && !conn.ContainsKey("DefaultAccessCode"))
+                    conn["DefaultAccessCode"] = accessCode.DeepClone();
+
+                if (installerCode is not null && !conn.ContainsKey("InstallerCode"))
+                    conn["InstallerCode"] = installerCode.DeepClone();
+            }
+        }
+
+        // Remove from Application section
+        if (hasAccessCode)
+            appSection.Remove("DefaultAccessCode");
+        if (hasInstallerCode)
+            appSection.Remove("DefaultInstallerCode");
+
+        return true;
+    }
+
+    /// <summary>
+    /// Renames DefaultInstallerCode → InstallerCode in existing connection entries
+    /// (for users who already ran migration 2 with the old name).
+    /// Returns true if the file was modified.
+    /// </summary>
+    private static bool RenameConnectionCodeProperties(JsonObject root)
+    {
+        var connections = root[PanelConnectionsSettings.SectionName]?["Connections"]?.AsArray();
+        if (connections is null)
+            return false;
+
+        var dirty = false;
+        foreach (var connNode in connections)
+        {
+            if (connNode is not JsonObject conn)
+                continue;
+
+            if (conn.ContainsKey("DefaultInstallerCode") && !conn.ContainsKey("InstallerCode"))
+            {
+                conn["InstallerCode"] = conn["DefaultInstallerCode"]?.DeepClone();
+                conn.Remove("DefaultInstallerCode");
+                dirty = true;
+            }
+        }
+
+        return dirty;
     }
 
     private static void MoveProperty(JsonObject source, string sourceKey, JsonObject target, string targetKey)

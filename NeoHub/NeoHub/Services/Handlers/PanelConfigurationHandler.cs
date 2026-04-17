@@ -22,7 +22,6 @@ namespace NeoHub.Services.Handlers
         private readonly IPanelStateService _panelState;
         private readonly IPanelConfigurationService _configService;
         private readonly IOptionsMonitor<PanelConnectionsSettings> _connectionSettings;
-        private readonly IOptionsMonitor<ApplicationSettings> _appSettings;
         private readonly ILogger<PanelConfigurationHandler> _logger;
 
         public PanelConfigurationHandler(
@@ -30,14 +29,12 @@ namespace NeoHub.Services.Handlers
             IPanelStateService panelState,
             IPanelConfigurationService configService,
             IOptionsMonitor<PanelConnectionsSettings> connectionSettings,
-            IOptionsMonitor<ApplicationSettings> appSettings,
             ILogger<PanelConfigurationHandler> logger)
         {
             _mediator = mediator;
             _panelState = panelState;
             _configService = configService;
             _connectionSettings = connectionSettings;
-            _appSettings = appSettings;
             _logger = logger;
         }
 
@@ -92,7 +89,7 @@ namespace NeoHub.Services.Handlers
 
                 // ── 2. Labels: installer config vs. explicit pull ──
                 _panelState.UpdateSession(sessionId, s => s.ConnectionPhase = ConnectionPhase.ReadingConfig);
-                var installerCode = _appSettings.CurrentValue.DefaultInstallerCode;
+                var installerCode = connectionSettings?.InstallerCode;
                 if (!string.IsNullOrEmpty(installerCode))
                 {
                     _logger.LogInformation("Installer code configured, reading panel configuration sections");

@@ -34,4 +34,10 @@ public interface IConnectionSettingsProvider
     /// </para>
     /// </summary>
     ConnectionSettings? ResolveConnection(string sessionId, EncryptionType encryptionType);
+
+    /// <summary>
+    /// Called after a successful connection to persist any trial factory defaults
+    /// that were used during the handshake.
+    /// </summary>
+    void ConfirmDefaults(string sessionId);
 }

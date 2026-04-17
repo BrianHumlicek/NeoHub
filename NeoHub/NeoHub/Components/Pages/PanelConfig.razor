@@ -12,7 +12,7 @@
 @inject IITv2SessionManager SessionManager
 @inject ISessionMonitor SessionMonitor
 @inject IJSRuntime JS
-@inject IOptionsMonitor<ApplicationSettings> AppSettings
+@inject IOptionsMonitor<PanelConnectionsSettings> ConnectionSettings
 @inject IDialogService DialogService
 @inject NavigationManager Navigation
 @inject ISnackbar Snackbar
@@ -293,7 +293,9 @@
             if (_config is not null)
             {
                 // Config loaded at startup — capture the installer code for writes
-                _installerCode = AppSettings.CurrentValue.DefaultInstallerCode;
+                _installerCode = ConnectionSettings.CurrentValue.Connections
+                    .FirstOrDefault(c => string.Equals(c.SessionId, _sessionId, StringComparison.OrdinalIgnoreCase))
+                    ?.InstallerCode;
                 StateHasChanged();
                 return;
             }
@@ -340,7 +342,9 @@
         if (_sessionId is null) return;
 
         var session = PanelState.GetSession(_sessionId);
-        var code = AppSettings.CurrentValue.DefaultInstallerCode;
+        var conn = ConnectionSettings.CurrentValue.Connections
+            .FirstOrDefault(c => string.Equals(c.SessionId, _sessionId, StringComparison.OrdinalIgnoreCase));
+        var code = conn?.InstallerCode;
 
         if (string.IsNullOrEmpty(code))
         {

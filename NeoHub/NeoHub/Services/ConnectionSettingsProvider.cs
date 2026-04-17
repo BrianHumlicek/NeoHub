@@ -40,7 +40,8 @@ public class ConnectionSettingsProvider : IConnectionSettingsProvider
                 "Unknown panel {SessionId} (encryption: {EncryptionType}). Creating placeholder connection entry.",
                 sessionId, encryptionType);
             CreatePlaceholder(sessionId, encryptionType);
-            return null;
+            // Fall through — try factory defaults on the newly created placeholder
+            existing = connections.Last();
         }
 
         // Always update encryption type to match what the panel actually uses
@@ -53,16 +54,65 @@ public class ConnectionSettingsProvider : IConnectionSettingsProvider
             PersistSettingsAsync();
         }
 
-        if (!existing.IsComplete)
+        if (existing.IsComplete)
         {
+            _logger.LogInformation("Resolved connection settings for session {SessionId}", sessionId);
+            return existing;
+        }
+
+        // Incomplete — try a trial copy with factory defaults
+        if (existing.HasEncryptionKey(encryptionType))
+        {
+            // Has the right key but something else is incomplete — can't help with defaults
             _logger.LogWarning(
                 "Connection settings for {SessionId} are incomplete. Please configure encryption keys.",
                 sessionId);
             return null;
         }
 
-        _logger.LogInformation("Resolved connection settings for session {SessionId}", sessionId);
-        return existing;
+        _logger.LogInformation(
+            "Connection settings for {SessionId} are incomplete. Trying factory default encryption key.",
+            sessionId);
+
+        return new ConnectionSettings
+        {
+            SessionId = existing.SessionId,
+            EncryptionType = encryptionType,
+            IntegrationAccessCodeType1 = existing.IntegrationAccessCodeType1
+                ?? (encryptionType == EncryptionType.Type1 ? ConnectionSettings.FactoryDefaultType1 : null),
+            IntegrationAccessCodeType2 = existing.IntegrationAccessCodeType2
+                ?? (encryptionType == EncryptionType.Type2 ? ConnectionSettings.FactoryDefaultType2 : null),
+            DefaultAccessCode = existing.DefaultAccessCode,
+            InstallerCode = existing.InstallerCode,
+            MasterCode = existing.MasterCode,
+            MaxZones = existing.MaxZones
+        };
+    }
+
+    public void ConfirmDefaults(string sessionId)
+    {
+        var existing = _settings.CurrentValue.Connections.FirstOrDefault(c =>
+            string.Equals(c.SessionId, sessionId, StringComparison.OrdinalIgnoreCase));
+
+        if (existing == null || existing.IsComplete)
+            return;
+
+        // The handshake succeeded with factory defaults — persist them
+        if (string.IsNullOrWhiteSpace(existing.IntegrationAccessCodeType1)
+            && existing.EncryptionType == EncryptionType.Type1)
+        {
+            existing.IntegrationAccessCodeType1 = ConnectionSettings.FactoryDefaultType1;
+        }
+
+        if (string.IsNullOrWhiteSpace(existing.IntegrationAccessCodeType2)
+            && existing.EncryptionType == EncryptionType.Type2)
+        {
+            existing.IntegrationAccessCodeType2 = ConnectionSettings.FactoryDefaultType2;
+        }
+
+        _logger.LogInformation(
+            "Factory defaults confirmed for {SessionId} — persisting to settings", sessionId);
+        PersistSettingsAsync();
     }
 
     private void CreatePlaceholder(string sessionId, EncryptionType encryptionType)

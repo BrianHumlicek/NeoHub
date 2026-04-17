@@ -31,6 +31,12 @@ public class ConnectionSettings
     /// </summary>
     public const int DefaultListenPort = 3072;
 
+    /// <summary>DSC factory default for Type 1 encryption access code.</summary>
+    public const string FactoryDefaultType1 = "12345678";
+
+    /// <summary>DSC factory default for Type 2 encryption access code.</summary>
+    public const string FactoryDefaultType2 = "12345678123456781234567812345678";
+
     /// <summary>
     /// Logging scope key used to tag log entries with a session identifier.
     /// </summary>
@@ -75,6 +81,45 @@ public class ConnectionSettings
         GroupName = "Encryption",
         Order = 3)]
     public string? IntegrationAccessCodeType2 { get; set; }
+
+    /// <summary>
+    /// Default access code for one-touch arm/disarm operations (optional).
+    /// If set, allows arming and disarming without entering a code each time.
+    /// DSC factory default is 1234.
+    /// </summary>
+    [Display(
+        Name = "Default Access Code",
+        Description = "Access code for one-touch arm/disarm/bypass (factory default: 1234)",
+        GroupName = "Panel Control",
+        Order = 4)]
+    [RegularExpression(@"^\d*$", ErrorMessage = "Access code must contain digits only")]
+    public string? DefaultAccessCode { get; set; }
+
+    /// <summary>
+    /// Installer code for accessing panel configuration sections (optional).
+    /// If set, the full installer configuration is read automatically on connect.
+    /// DSC factory default is 5555.
+    /// </summary>
+    [Display(
+        Name = "Installer Code",
+        Description = "Installer code for configuration access (factory default: 5555)",
+        GroupName = "Panel Control",
+        Order = 5)]
+    [RegularExpression(@"^\d*$", ErrorMessage = "Installer code must contain digits only")]
+    public string? InstallerCode { get; set; }
+
+    /// <summary>
+    /// Master code for user management operations (optional).
+    /// Required for adding, editing, or removing user codes on the panel.
+    /// DSC factory default is 1234.
+    /// </summary>
+    [Display(
+        Name = "Master Code",
+        Description = "Master code for user management (factory default: 1234)",
+        GroupName = "Panel Control",
+        Order = 6)]
+    [RegularExpression(@"^\d*$", ErrorMessage = "Master code must contain digits only")]
+    public string? MasterCode { get; set; }
 
     /// <summary>
     /// Maximum number of zones to pull from this panel.

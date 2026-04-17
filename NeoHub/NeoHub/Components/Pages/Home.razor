@@ -12,7 +12,6 @@
 @inject ISessionMonitor SessionMonitor
 @inject NavigationManager Navigation
 @inject ISnackbar Snackbar
-@inject IOptionsMonitor<ApplicationSettings> Settings
 @inject IOptionsMonitor<PanelConnectionsSettings> ConnectionSettings
 @implements IDisposable
 
@@ -207,10 +206,10 @@
                       Immediate="true"
                       Variant="Variant.Outlined"
                       ReadOnly="true"
-                      Class="mt-2 mb-4"
-                      HelperText="@(string.IsNullOrEmpty(Settings.CurrentValue.DefaultAccessCode) ? "" : "Leave empty to use default code")" />
+                                     Class="mt-2 mb-4"
+                                     HelperText="@(HasDefaultAccessCode(disarmSessionId) ? "Leave empty to use default code" : "")" />
 
-        <MudGrid Spacing="2">
+                      <MudGrid Spacing="2">
             @for (int i = 1; i <= 9; i++)
             {
                 var digit = i;
@@ -498,4 +497,10 @@
 		PanelState.PartitionStateChanged -= OnStateChanged;
 		PanelState.ZoneStateChanged -= OnStateChanged;
 	}
+
+	private bool HasDefaultAccessCode(string? sessionId) =>
+		!string.IsNullOrEmpty(sessionId) &&
+		!string.IsNullOrEmpty(ConnectionSettings.CurrentValue.Connections
+			.FirstOrDefault(c => string.Equals(c.SessionId, sessionId, StringComparison.OrdinalIgnoreCase))
+			?.DefaultAccessCode);
 }
