@@ -17,8 +17,8 @@
 namespace DSC.TLink.Serialization
 {
     /// <summary>
-    /// Marks a string property as UTF-16LE encoded with a leading length prefix.
-    /// The serialized format is: [Length:1-2 bytes][UTF-16LE encoded string bytes]
+    /// Marks a string property as UTF-16BE encoded with a leading length prefix.
+    /// The serialized format is: [Length:1-2 bytes][UTF-16BE encoded string bytes]
     /// The length prefix represents the number of encoded bytes, not the character count.
     /// </summary>
     /// <example>

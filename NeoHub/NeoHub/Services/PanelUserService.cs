@@ -109,6 +109,14 @@ namespace NeoHub.Services
         public async Task<PanelUserWriteResult> WriteUserAsync(
             string sessionId, Models.PanelUserState user, Models.PanelUserState original, CancellationToken ct)
         {
+            // Short-circuit if nothing changed — avoids an unnecessary programming-mode round-trip.
+            bool codeDirty = user.CodeValue != original.CodeValue;
+            bool attrsDirty = user.Attributes != original.Attributes;
+            bool partsDirty = !user.Partitions.SequenceEqual(original.Partitions);
+            bool labelDirty = user.UserLabel != original.UserLabel;
+            if (!codeDirty && !attrsDirty && !partsDirty && !labelDirty)
+                return new PanelUserWriteResult(true);
+
             var masterCode = _appSettings.CurrentValue.DefaultAccessCode;
             if (string.IsNullOrWhiteSpace(masterCode))
                 return new PanelUserWriteResult(false, "Master code (DefaultAccessCode) not configured");
@@ -121,7 +129,7 @@ namespace NeoHub.Services
                 var errors = new List<string>();
                 int idx = user.UserIndex;
 
-                if (user.CodeValue != original.CodeValue)
+                if (codeDirty)
                 {
                     if (!await SendCommandAsync(sessionId, new AccessCodeWrite
                     {
@@ -132,7 +140,7 @@ namespace NeoHub.Services
                         errors.Add("Access code");
                 }
 
-                if (user.Attributes != original.Attributes)
+                if (attrsDirty)
                 {
                     if (!await SendCommandAsync(sessionId, new AccessCodeAttributeWrite
                     {
@@ -144,17 +152,22 @@ namespace NeoHub.Services
                         errors.Add("Attributes");
                 }
 
-                if (!user.Partitions.SequenceEqual(original.Partitions))
+                if (partsDirty)
                 {
                     int maxPartitions = _panelState.GetSession(sessionId)?.MaxPartitions ?? 8;
                     int dataWidth = Math.Max(1, (maxPartitions + 7) / 8);
                     var bitmask = new byte[dataWidth];
                     foreach (var p in user.Partitions)
                     {
+                        if (p < 1 || p > maxPartitions)
+                        {
+                            _logger.LogWarning("User {Index}: partition {Partition} out of range 1..{Max}, ignoring",
+                                idx, p, maxPartitions);
+                            continue;
+                        }
                         int byteIndex = (p - 1) / 8;
                         int bitIndex = (p - 1) % 8;
-                        if (byteIndex < bitmask.Length)
-                            bitmask[byteIndex] |= (byte)(1 << bitIndex);
+                        bitmask[byteIndex] |= (byte)(1 << bitIndex);
                     }
 
                     if (!await SendCommandAsync(sessionId, new AccessCodePartitionAssignmentWrite
@@ -167,7 +180,7 @@ namespace NeoHub.Services
                         errors.Add("Partition assignments");
                 }
 
-                if (user.UserLabel != original.UserLabel)
+                if (labelDirty)
                 {
                     if (!await SendCommandAsync(sessionId, new AccessCodeLabelWrite
                     {
@@ -294,43 +307,38 @@ namespace NeoHub.Services
             int partitionWidth = Math.Max(1, (session.MaxPartitions + 7) / 8);
             var sw = Stopwatch.StartNew();
 
-            UpdateProgress(session, sessionId, "Reading user data…");
-
-            // Run all 4 data type reads in parallel — each batches internally
-            var codesTask = ReadBatchedAsync<AccessCodeReadResponse, string>(
+            UpdateProgress(session, sessionId, "Reading access codes…");
+            // Conservative: 8-digit codes = 4 BCD bytes
+            var codes = await ReadBatchedAsync<AccessCodeReadResponse, string>(
                 sessionId, maxUsers,
-                MaxRecordsPerBatch(bytesPerRecord: 4), // Conservative: 8-digit codes = 4 BCD bytes
+                MaxRecordsPerBatch(bytesPerRecord: 4),
                 (start, count) => new AccessCodeReadRequest { AccessCodeStart = start, AccessCodeCount = count },
                 r => r.AccessCodes,
                 ct);
 
-            var attrsTask = ReadBatchedAsync<AccessCodeAttributeReadResponse, PanelUserAttributes>(
+            UpdateProgress(session, sessionId, "Reading attributes…");
+            var attrs = await ReadBatchedAsync<AccessCodeAttributeReadResponse, PanelUserAttributes>(
                 sessionId, maxUsers,
                 MaxRecordsPerBatch(bytesPerRecord: 1),
                 (start, count) => new AccessCodeAttributeReadRequest { AccessCodeStart = start, AccessCodeCount = count },
                 r => r.Attributes,
                 ct);
 
-            var partsTask = ReadBatchedAsync<AccessCodePartitionAssignmentReadResponse, List<byte>>(
+            UpdateProgress(session, sessionId, "Reading partition assignments…");
+            var parts = await ReadBatchedAsync<AccessCodePartitionAssignmentReadResponse, List<byte>>(
                 sessionId, maxUsers,
                 MaxRecordsPerBatch(bytesPerRecord: partitionWidth),
                 (start, count) => new AccessCodePartitionAssignmentReadRequest { AccessCodeStart = start, AccessCodeCount = count },
                 r => r.PartitionAssignments,
                 ct);
 
-            var confsTask = ReadBatchedAsync<UserCodeConfigurationReadResponse, UserCodeConfigurationReadResponse.UserCodeType>(
+            UpdateProgress(session, sessionId, "Reading code configuration…");
+            var confs = await ReadBatchedAsync<UserCodeConfigurationReadResponse, UserCodeConfigurationReadResponse.UserCodeType>(
                 sessionId, maxUsers,
                 MaxRecordsPerBatch(bytesPerRecord: 1),
                 (start, count) => new UserCodeConfigurationReadRequest { UserCodeStart = start, UserCodeCount = count },
                 r => r.CodeType,
                 ct);
-
-            await Task.WhenAll(codesTask, attrsTask, partsTask, confsTask);
-
-            var codes = codesTask.Result;
-            var attrs = attrsTask.Result;
-            var parts = partsTask.Result;
-            var confs = confsTask.Result;
 
             // Assemble PanelUserState from batch results
             int readCount = 0, failedCount = 0;
@@ -374,12 +382,8 @@ namespace NeoHub.Services
             _panelState.UpdateSession(sessionId, _ => { });
 
             _logger.LogInformation(
-                "Read {Total} users in {Elapsed}ms ({Ok} OK, {Failed} failed, batches: codes={CodeBatches} attrs={AttrBatches} parts={PartBatches} conf={ConfBatches})",
-                maxUsers, sw.ElapsedMilliseconds, readCount, failedCount,
-                CeilDiv(maxUsers, MaxRecordsPerBatch(4)),
-                CeilDiv(maxUsers, MaxRecordsPerBatch(1)),
-                CeilDiv(maxUsers, MaxRecordsPerBatch(partitionWidth)),
-                CeilDiv(maxUsers, MaxRecordsPerBatch(1)));
+                "Read {Total} users in {Elapsed}ms ({Ok} OK, {Failed} failed)",
+                maxUsers, sw.ElapsedMilliseconds, readCount, failedCount);
 
             session.UsersLastReadAt = DateTime.UtcNow;
             _panelState.UpdateSession(sessionId, _ => { });
@@ -390,8 +394,6 @@ namespace NeoHub.Services
                 FailedCount = failedCount,
             };
         }
-
-        private static int CeilDiv(int a, int b) => (a + b - 1) / b;
 
         /// <summary>
         /// Reads a data type for all users in batches, returning a dictionary keyed by 1-based user index.

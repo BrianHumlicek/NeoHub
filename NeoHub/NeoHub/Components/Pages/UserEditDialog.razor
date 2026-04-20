@@ -1,6 +1,7 @@
 @using NeoHub.Services
 @using NeoHub.Services.Models
 @using DSC.TLink.ITv2.Enumerations
+@implements IDisposable
 @inject IPanelUserService UserService
 @inject ISnackbar Snackbar
 
@@ -15,6 +16,12 @@
             <MudTextField T="string" @bind-Value="_code" Label="Access Code"
                           Variant="Variant.Outlined"
                           InputType="@(_revealCode ? InputType.Text : InputType.Password)"
+                          InputMode="InputMode.numeric"
+                          MaxLength="6"
+                          Pattern="[0-9]*"
+                          Validation="@((string? c) => ValidateCode(c))"
+                          HelperText="4 or 6 digits (empty to clear)"
+                          Immediate="true"
                           Adornment="Adornment.End"
                           AdornmentIcon="@(_revealCode ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
                           OnAdornmentClick="() => _revealCode = !_revealCode"
@@ -62,7 +69,7 @@
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel">Cancel</MudButton>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync" Disabled="_saving">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync" Disabled="@(_saving || !IsCodeValid(_code))">
             @if (_saving)
             {
                 <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
@@ -91,6 +98,7 @@
     private bool[] _partitionAssigned = [];
     private bool _revealCode;
     private bool _saving;
+    private CancellationTokenSource? _cts;
 
     // Snapshots for dirty-check write
     private string _origLabel = "";
@@ -131,25 +139,46 @@
     private void ToggleAttribute(PanelUserAttributes flag, bool set) =>
         _attributes = set ? _attributes | flag : _attributes & ~flag;
 
+    private static bool IsCodeValid(string? code)
+    {
+        if (string.IsNullOrEmpty(code)) return true; // empty clears the code
+        if (code.Length != 4 && code.Length != 6) return false;
+        foreach (var ch in code)
+            if (ch < '0' || ch > '9') return false;
+        return true;
+    }
+
+    private static string? ValidateCode(string? code) =>
+        IsCodeValid(code) ? null : "Access code must be 4 or 6 digits";
+
     private async Task SaveAsync()
     {
+        if (!IsCodeValid(_code))
+        {
+            Snackbar.Add("Access code must be 4 or 6 digits", Severity.Warning);
+            return;
+        }
+
         _saving = true;
         StateHasChanged();
 
+        _cts ??= new CancellationTokenSource();
+
         try
         {
-            var trimmedLabel = string.IsNullOrWhiteSpace(_label) ? null : _label.Trim();
-            var origTrimmedLabel = string.IsNullOrWhiteSpace(_origLabel) ? null : _origLabel.Trim();
+            // TrimEnd only — preserve any intentional leading whitespace on keypad labels.
+            var trimmedLabel = string.IsNullOrWhiteSpace(_label) ? null : _label.TrimEnd();
+            var origTrimmedLabel = string.IsNullOrWhiteSpace(_origLabel) ? null : _origLabel.TrimEnd();
 
             var edited = new PanelUserState
             {
                 UserIndex = User.UserIndex,
                 UserLabel = trimmedLabel,
                 CodeValue = _code,
-                CodeLength = _code?.Length,
+                CodeLength = User.CodeLength, // panel-reported value; not derived from typed text
                 Attributes = _attributes,
                 Partitions = BuildPartitionList(),
-                IsActive = _attributes != PanelUserAttributes.None || !string.IsNullOrEmpty(_code),
+                IsActive = _attributes != PanelUserAttributes.None,
                 HasProximityTag = User.HasProximityTag,
             };
 
@@ -158,14 +187,14 @@
                 UserIndex = User.UserIndex,
                 UserLabel = origTrimmedLabel,
                 CodeValue = _origCode,
-                CodeLength = _origCode?.Length,
+                CodeLength = User.CodeLength,
                 Attributes = _origAttributes,
                 Partitions = BuildPartitionList(_origPartitionAssigned),
-                IsActive = User.IsActive,
+                IsActive = _origAttributes != PanelUserAttributes.None,
                 HasProximityTag = User.HasProximityTag,
             };
 
-            var result = await UserService.WriteUserAsync(SessionId, edited, original, CancellationToken.None);
+            var result = await UserService.WriteUserAsync(SessionId, edited, original, _cts.Token);
 
             if (result.Success)
             {
@@ -176,6 +205,10 @@
             {
                 Snackbar.Add($"Save failed: {result.ErrorMessage}", Severity.Error);
             }
+        }
+        catch (OperationCanceledException)
+        {
+            // Dialog closed mid-save; swallow.
         }
         catch (Exception ex)
         {
@@ -201,4 +234,10 @@
     }
 
     private void Cancel() => MudDialog.Cancel();
+
+    public void Dispose()
+    {
+        _cts?.Cancel();
+        _cts?.Dispose();
+    }
 }

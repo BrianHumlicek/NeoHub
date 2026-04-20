@@ -81,7 +81,7 @@ namespace DSC.TLink.Serialization
 
         internal static void WriteUnicodeString(List<byte> bytes, string propertyName, string? str, int lengthBytes)
         {
-            var encoded = Encoding.Unicode.GetBytes(str ?? string.Empty);
+            var encoded = Encoding.BigEndianUnicode.GetBytes(str ?? string.Empty);
 
             switch (lengthBytes)
             {
@@ -120,7 +120,7 @@ namespace DSC.TLink.Serialization
                 throw new InvalidOperationException(
                     $"Not enough bytes to read Unicode string '{propertyName}' (need {length}, have {bytes.Length - offset})");
 
-            var str = Encoding.Unicode.GetString(bytes.Slice(offset, length));
+            var str = Encoding.BigEndianUnicode.GetString(bytes.Slice(offset, length));
             offset += length;
             return str;
         }

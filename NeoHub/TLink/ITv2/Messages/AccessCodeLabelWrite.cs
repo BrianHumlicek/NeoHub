@@ -1,6 +1,5 @@
 ﻿using DSC.TLink.ITv2.Enumerations;
 using DSC.TLink.Serialization;
-using System.Text;
 
 namespace DSC.TLink.ITv2.Messages
 {
@@ -13,15 +12,16 @@ namespace DSC.TLink.ITv2.Messages
     /// [CommandSequence  : 1B]                          — from CommandMessageBase
     /// [AccessCodeStart  : CompactInteger]              — 1-based user index
     /// [AccessCodeCount  : CompactInteger]              — number of labels
-    /// [Format           : 1B = 0x03 (UTF-16BE)]       — label encoding format
+    /// [Format           : 1B = 0x03 (UTF-16BE)]        — label encoding format
     /// Per label (AccessCodeCount times):
-    ///   [LabelByteLength : 1B = 0x1C (28)]            — byte count of UTF-16BE data
-    ///   [UTF-16BE data   : LabelByteLength bytes]     — label padded to 14 chars with spaces
+    ///   [LabelByteLength : 1B = 0x1C (28)]             — byte count of UTF-16BE data
+    ///   [UTF-16BE data   : LabelByteLength bytes]      — label padded to 14 chars with spaces
     /// </summary>
     [ITv2Command(ITv2Command.Configuration_Write_Access_Codes_Label)]
     public record AccessCodeLabelWrite : CommandMessageBase
     {
-        private const int LabelCharLength = 14;
+        /// <summary>Required label length in characters (28 bytes UTF-16BE).</summary>
+        public const int LabelCharLength = 14;
 
         [CompactInteger]
         public int AccessCodeStart { get; init; }
@@ -35,40 +35,32 @@ namespace DSC.TLink.ITv2.Messages
         public byte Format { get; init; } = 0x03;
 
         /// <summary>
-        /// Per-label wire data: each label as [1-byte length][UTF-16BE bytes].
-        /// Computed from <see cref="AccessCodeLabels"/>.
+        /// User-facing label strings. Each label is normalized to exactly
+        /// <see cref="LabelCharLength"/> characters: shorter labels are space-padded,
+        /// longer labels are truncated.
         /// </summary>
-        public byte[] LabelData
-        {
-            get => EncodeLabelData();
-            set { } // Write-only command; setter present for serializer compatibility.
-        }
-
-        /// <summary>
-        /// The user-facing label strings. Each is padded/truncated to 14 characters.
-        /// This property is not serialized directly; it feeds <see cref="LabelData"/>.
-        /// </summary>
-        [IgnoreProperty]
+        [UnicodeString]
         public string[] AccessCodeLabels
         {
-            get => _labels;
-            init => _labels = (value ?? Array.Empty<string>())
-                .Select(s => (s ?? "").PadRight(LabelCharLength)[..LabelCharLength])
-                .ToArray();
+            get => _accessCodeLabels;
+            init => _accessCodeLabels = Normalize(value);
         }
+        private readonly string[] _accessCodeLabels = Array.Empty<string>();
 
-        private string[] _labels = Array.Empty<string>();
-
-        private byte[] EncodeLabelData()
+        private static string[] Normalize(string[]? labels)
         {
-            var result = new List<byte>();
-            foreach (var label in _labels)
+            if (labels is null || labels.Length == 0)
+                return Array.Empty<string>();
+
+            var result = new string[labels.Length];
+            for (int i = 0; i < labels.Length; i++)
             {
-                var encoded = Encoding.BigEndianUnicode.GetBytes(label);
-                result.Add((byte)encoded.Length);
-                result.AddRange(encoded);
+                var s = labels[i] ?? string.Empty;
+                result[i] = s.Length >= LabelCharLength
+                    ? s[..LabelCharLength]
+                    : s.PadRight(LabelCharLength);
             }
-            return result.ToArray();
+            return result;
         }
     }
 }
