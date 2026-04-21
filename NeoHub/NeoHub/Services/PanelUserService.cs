@@ -13,7 +13,7 @@ namespace NeoHub.Services
     {
         private readonly IMediator _mediator;
         private readonly IPanelStateService _panelState;
-        private readonly IOptionsMonitor<ApplicationSettings> _appSettings;
+        private readonly IOptionsMonitor<PanelConnectionsSettings> _connectionSettings;
         private readonly ILogger<PanelUserService> _logger;
 
         /// <summary>
@@ -40,12 +40,12 @@ namespace NeoHub.Services
         public PanelUserService(
             IMediator mediator,
             IPanelStateService panelState,
-            IOptionsMonitor<ApplicationSettings> appSettings,
+            IOptionsMonitor<PanelConnectionsSettings> connectionSettings,
             ILogger<PanelUserService> logger)
         {
             _mediator = mediator;
             _panelState = panelState;
-            _appSettings = appSettings;
+            _connectionSettings = connectionSettings;
             _logger = logger;
         }
 
@@ -61,9 +61,9 @@ namespace NeoHub.Services
             _logger.LogInformation("Reading panel users for session {SessionId}, max users: {MaxUsers}", sessionId, session.MaxUsers);
 
             // Access code commands require AccessCodeProgramming mode with the master code.
-            var masterCode = _appSettings.CurrentValue.DefaultAccessCode;
+            var masterCode = GetMasterCode(sessionId);
             if (string.IsNullOrWhiteSpace(masterCode))
-                return new PanelUserReadResult(false, "Master code (DefaultAccessCode) not configured");
+                return new PanelUserReadResult(false, "Master code not configured for this panel");
 
             session.IsReadingUsers = true;
             session.UserReadCurrent = 0;
@@ -109,17 +109,32 @@ namespace NeoHub.Services
         public async Task<PanelUserWriteResult> WriteUserAsync(
             string sessionId, Models.PanelUserState user, Models.PanelUserState original, CancellationToken ct)
         {
-            // Short-circuit if nothing changed — avoids an unnecessary programming-mode round-trip.
+            // Detect enable/disable crossings. The panel has side-effects when the access code
+            // crosses the enabled/disabled threshold (attributes and partitions get reset by the
+            // panel itself). Rather than guess at the panel's defaults we only write the code,
+            // then re-read the authoritative state after. This makes the crossing a two-step
+            // UX: save the code first, then optionally make further edits.
+            bool wasDisabled = Models.PanelUserState.IsDisabledCode(original.CodeValue);
+            bool nowDisabled = Models.PanelUserState.IsDisabledCode(user.CodeValue);
+            bool crossed = wasDisabled != nowDisabled;
+
             bool codeDirty = user.CodeValue != original.CodeValue;
             bool attrsDirty = user.Attributes != original.Attributes;
             bool partsDirty = !user.Partitions.SequenceEqual(original.Partitions);
             bool labelDirty = user.UserLabel != original.UserLabel;
-            if (!codeDirty && !attrsDirty && !partsDirty && !labelDirty)
-                return new PanelUserWriteResult(true);
 
-            var masterCode = _appSettings.CurrentValue.DefaultAccessCode;
+            // On a crossing save, only the access code is written. All other dirty edits are
+            // ignored so we never fight the panel's post-crossing reset.
+            bool writeAttrs = !crossed && attrsDirty;
+            bool writeParts = !crossed && partsDirty;
+            bool writeLabel = !crossed && labelDirty;
+
+            if (!codeDirty && !writeAttrs && !writeParts && !writeLabel)
+                return new PanelUserWriteResult(true) { UpdatedUser = user };
+
+            var masterCode = GetMasterCode(sessionId);
             if (string.IsNullOrWhiteSpace(masterCode))
-                return new PanelUserWriteResult(false, "Master code (DefaultAccessCode) not configured");
+                return new PanelUserWriteResult(false, "Master code not configured for this panel");
 
             if (!await EnterProgrammingModeAsync(sessionId, ProgrammingMode.AccessCodeProgramming, masterCode, readWrite: true, ct))
                 return new PanelUserWriteResult(false, "Failed to enter programming mode");
@@ -140,7 +155,7 @@ namespace NeoHub.Services
                         errors.Add("Access code");
                 }
 
-                if (attrsDirty)
+                if (writeAttrs)
                 {
                     if (!await SendCommandAsync(sessionId, new AccessCodeAttributeWrite
                     {
@@ -152,7 +167,7 @@ namespace NeoHub.Services
                         errors.Add("Attributes");
                 }
 
-                if (partsDirty)
+                if (writeParts)
                 {
                     int maxPartitions = _panelState.GetSession(sessionId)?.MaxPartitions ?? 8;
                     int dataWidth = Math.Max(1, (maxPartitions + 7) / 8);
@@ -180,7 +195,7 @@ namespace NeoHub.Services
                         errors.Add("Partition assignments");
                 }
 
-                if (labelDirty)
+                if (writeLabel)
                 {
                     if (!await SendCommandAsync(sessionId, new AccessCodeLabelWrite
                     {
@@ -194,6 +209,13 @@ namespace NeoHub.Services
                 if (errors.Count > 0)
                     return new PanelUserWriteResult(false, $"Failed to write: {string.Join(", ", errors)}");
 
+                // On a crossing, re-read the authoritative panel state so our local copy
+                // reflects whatever the panel actually did (attrs/partitions reset, etc.).
+                if (crossed)
+                {
+                    await RefreshSingleUserAsync(sessionId, user, ct);
+                }
+
                 var session = _panelState.GetSession(sessionId);
                 if (session != null)
                 {
@@ -202,12 +224,103 @@ namespace NeoHub.Services
                     _panelState.UpdateSession(sessionId, _ => { });
                 }
 
-                return new PanelUserWriteResult(true);
+                return new PanelUserWriteResult(true)
+                {
+                    Crossed = crossed,
+                    UpdatedUser = user,
+                };
             }
             finally
             {
                 await ExitConfigModeAsync(sessionId, ct);
             }
+        }
+
+        public Task<PanelUserWriteResult> DisableUserAsync(string sessionId, int userIndex, CancellationToken ct)
+        {
+            var session = _panelState.GetSession(sessionId);
+            if (session is null || !session.Users.TryGetValue(userIndex, out var existing))
+                return Task.FromResult(new PanelUserWriteResult(false, "User not found in session"));
+
+            // Sentinel length must match the panel's configured code length so the panel round-trips it.
+            int codeLength = existing.CodeLength is 4 or 6 or 8 ? existing.CodeLength!.Value : 4;
+            var sentinel = Models.PanelUserState.DisabledAccessCode(codeLength);
+
+            var edited = CloneForEdit(existing);
+            edited.CodeValue = sentinel;
+            edited.CodeLength = codeLength;
+
+            // WriteUserAsync detects the crossing, writes the code only, re-reads the slot.
+            return WriteUserAsync(sessionId, edited, existing, ct);
+        }
+
+        public Task<PanelUserWriteResult> EnableUserAsync(string sessionId, int userIndex, string newCode, CancellationToken ct)
+        {
+            if (string.IsNullOrEmpty(newCode)
+                || (newCode.Length != 4 && newCode.Length != 6 && newCode.Length != 8)
+                || newCode.Any(c => c < '0' || c > '9'))
+            {
+                return Task.FromResult(new PanelUserWriteResult(false, "Access code must be 4, 6, or 8 digits"));
+            }
+
+            var session = _panelState.GetSession(sessionId);
+            if (session is null || !session.Users.TryGetValue(userIndex, out var existing))
+                return Task.FromResult(new PanelUserWriteResult(false, "User not found in session"));
+
+            var edited = CloneForEdit(existing);
+            edited.CodeValue = newCode;
+            edited.CodeLength = newCode.Length;
+
+            return WriteUserAsync(sessionId, edited, existing, ct);
+        }
+
+        /// <summary>
+        /// Shallow clone of a <see cref="Models.PanelUserState"/> for use as the "edited" input
+        /// to <see cref="WriteUserAsync"/>. Uses a fresh <c>Partitions</c> list so dirty-check
+        /// sees an independent sequence even though the values are equal.
+        /// </summary>
+        private static Models.PanelUserState CloneForEdit(Models.PanelUserState src) => new()
+        {
+            UserIndex = src.UserIndex,
+            UserLabel = src.UserLabel,
+            CodeValue = src.CodeValue,
+            CodeLength = src.CodeLength,
+            Attributes = src.Attributes,
+            Partitions = new List<byte>(src.Partitions),
+            HasProximityTag = src.HasProximityTag,
+        };
+
+        /// <summary>
+        /// Re-reads attributes, partitions, and code configuration for a single user slot
+        /// and patches the in-place <paramref name="user"/> with the fresh values.
+        /// Assumes the caller is already in AccessCodeProgramming mode. Access code and
+        /// label are not re-read; the access code was just written and the label is
+        /// unaffected by enable/disable crossings.
+        /// </summary>
+        private async Task RefreshSingleUserAsync(string sessionId, Models.PanelUserState user, CancellationToken ct)
+        {
+            int idx = user.UserIndex;
+
+            var attrResp = await SendRequestAsync<AccessCodeAttributeReadResponse>(
+                sessionId,
+                new AccessCodeAttributeReadRequest { AccessCodeStart = idx, AccessCodeCount = 1 },
+                ct);
+            if (attrResp?.Attributes is { Length: > 0 } attrs)
+                user.Attributes = attrs[0];
+
+            var partResp = await SendRequestAsync<AccessCodePartitionAssignmentReadResponse>(
+                sessionId,
+                new AccessCodePartitionAssignmentReadRequest { AccessCodeStart = idx, AccessCodeCount = 1 },
+                ct);
+            if (partResp?.PartitionAssignments is { Length: > 0 } parts)
+                user.Partitions = parts[0];
+
+            var confResp = await SendRequestAsync<UserCodeConfigurationReadResponse>(
+                sessionId,
+                new UserCodeConfigurationReadRequest { UserCodeStart = idx, UserCodeCount = 1 },
+                ct);
+            if (confResp?.CodeType is { Length: > 0 } codeTypes)
+                user.HasProximityTag = codeTypes[0] == UserCodeConfigurationReadResponse.UserCodeType.ProximityTag;
         }
 
         private async Task<bool> SendCommandAsync(string sessionId, IMessageData command, CancellationToken ct)
@@ -225,6 +338,11 @@ namespace NeoHub.Services
         }
 
         // ── Progress reporting ────────────────────────────────────────────
+
+        private string? GetMasterCode(string sessionId) =>
+            _connectionSettings.CurrentValue.Connections
+                .FirstOrDefault(c => string.Equals(c.SessionId, sessionId, StringComparison.OrdinalIgnoreCase))
+                ?.MasterCode;
 
         private void UpdateProgress(Models.SessionState session, string sessionId, string message)
         {
@@ -363,7 +481,6 @@ namespace NeoHub.Services
                 if (attrs.TryGetValue(i, out var attr))
                 {
                     state.Attributes = attr;
-                    state.IsActive = attr != PanelUserAttributes.None;
                 }
 
                 if (parts.TryGetValue(i, out var partList))

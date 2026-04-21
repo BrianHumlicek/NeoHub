@@ -252,7 +252,11 @@
     {
         if (_sessionId is null) return;
 
-        var statusText = user.IsActive ? (user.UserIndex == 1 ? " — Master" : " — Active") : " — Empty";
+        var statusText = user.IsDisabled
+            ? " — Disabled"
+            : user.IsActive
+                ? (user.UserIndex == 1 ? " — Master" : " — Active")
+                : " — Empty";
 
         var parameters = new DialogParameters<UserEditDialog>
         {
@@ -280,7 +284,8 @@
 
     private string FormatCode(PanelUserState user)
     {
-        if (string.IsNullOrEmpty(user.CodeValue))
+        // Hide the disabled sentinel from the UI — users see the chip, not "AAAA".
+        if (user.IsDisabled || string.IsNullOrEmpty(user.CodeValue))
             return "—";
         if (_revealCodes)
             return user.CodeValue;
@@ -325,6 +330,12 @@
 
     private static RenderFragment GetUserStatusChip(PanelUserState user) => __builder =>
     {
+        if (user.IsDisabled)
+        {
+            <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">Disabled</MudChip>;
+            return;
+        }
+
         if (!user.IsActive)
         {
             <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">Empty</MudChip>;

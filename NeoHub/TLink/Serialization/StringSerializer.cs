@@ -132,11 +132,24 @@ namespace DSC.TLink.Serialization
 
             for (int i = 0; i < fixedLength; i++)
             {
-                byte highNibble = (byte)(padded[i * 2] - '0');
-                byte lowNibble = (byte)(padded[i * 2 + 1] - '0');
+                byte highNibble = ParseHexNibble(padded[i * 2]);
+                byte lowNibble = ParseHexNibble(padded[i * 2 + 1]);
                 bytes.Add((byte)((highNibble << 4) | lowNibble));
             }
         }
+
+        /// <summary>
+        /// Parses a single hex nibble character (0-9, A-F, a-f).
+        /// Panels use hex sentinels like "AAAA" (disabled access code) that must round-trip
+        /// through BCD fields, so we accept the full hex alphabet, not just decimal digits.
+        /// </summary>
+        private static byte ParseHexNibble(char c) => c switch
+        {
+            >= '0' and <= '9' => (byte)(c - '0'),
+            >= 'A' and <= 'F' => (byte)(c - 'A' + 10),
+            >= 'a' and <= 'f' => (byte)(c - 'a' + 10),
+            _ => throw new InvalidOperationException($"Invalid BCD/hex digit character '{c}' (0x{(int)c:X})")
+        };
 
         internal static void WriteBCDStringUnbounded(List<byte> bytes, string? str)
         {

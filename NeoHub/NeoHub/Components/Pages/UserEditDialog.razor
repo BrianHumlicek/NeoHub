@@ -7,74 +7,122 @@
 
 <MudDialog>
     <DialogContent>
-        <MudStack Spacing="4">
-            @* ── User Label ── *@
-            <MudTextField T="string" @bind-Value="_label" Label="User Label"
-                          Variant="Variant.Outlined" MaxLength="14" />
+        @if (_disabled)
+        {
+            @* ─── Disabled view: only the access code input ─── *@
+            <MudStack Spacing="3">
+                <MudAlert Severity="Severity.Info" Dense="true" Icon="@Icons.Material.Filled.Block">
+                    This user is <strong>disabled</strong>. Enter a new
+                    <strong>4, 6, or 8 digit</strong> access code and click <em>Enable</em>.
+                </MudAlert>
 
-            @* ── Access Code ── *@
-            <MudTextField T="string" @bind-Value="_code" Label="Access Code"
-                          Variant="Variant.Outlined"
-                          InputType="@(_revealCode ? InputType.Text : InputType.Password)"
-                          InputMode="InputMode.numeric"
-                          MaxLength="6"
-                          Pattern="[0-9]*"
-                          Validation="@((string? c) => ValidateCode(c))"
-                          HelperText="4 or 6 digits (empty to clear)"
-                          Immediate="true"
-                          Adornment="Adornment.End"
-                          AdornmentIcon="@(_revealCode ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
-                          OnAdornmentClick="() => _revealCode = !_revealCode"
-                          Style="font-family: 'Courier New', monospace;" />
-
-            @* ── Attributes ── *@
-            <MudText Typo="Typo.subtitle2">Attributes</MudText>
-            <MudStack Row="true" Spacing="4" Wrap="Wrap.Wrap">
-                @foreach (var (flag, name) in AttributeFlags)
-                {
-                    var f = flag;
-                    <MudCheckBox T="bool"
-                                 Value="@_attributes.HasFlag(f)"
-                                 ValueChanged="@(v => ToggleAttribute(f, v))"
-                                 Label="@name"
-                                 Dense="true" />
-                }
+                <MudTextField T="string" @bind-Value="_newCode" Label="New Access Code"
+                              Variant="Variant.Outlined"
+                              InputType="@(_revealCode ? InputType.Text : InputType.Password)"
+                              InputMode="InputMode.numeric"
+                              MaxLength="8"
+                              Validation="@((string? c) => ValidateCode(c))"
+                              HelperText="4, 6, or 8 digits"
+                              Immediate="true"
+                              AutoFocus="true"
+                              Adornment="Adornment.End"
+                              AdornmentIcon="@(_revealCode ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                              OnAdornmentClick="() => _revealCode = !_revealCode"
+                              Style="font-family: 'Courier New', monospace;" />
             </MudStack>
+        }
+        else
+        {
+            @* ─── Enabled view: full editor ─── *@
+            <MudStack Spacing="4">
+                @* Top row: read-only PIN/Proximity indicator on the left, Disable button on the right *@
+                <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
+                    <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Code Type:</MudText>
+                        <MudChip T="string" Size="Size.Small"
+                                 Variant="@(User.HasProximityTag ? Variant.Outlined : Variant.Filled)"
+                                 Color="@(User.HasProximityTag ? Color.Default : Color.Info)"
+                                 Icon="@(User.HasProximityTag ? null : Icons.Material.Filled.Check)">
+                            PIN
+                        </MudChip>
+                        <MudChip T="string" Size="Size.Small"
+                                 Variant="@(User.HasProximityTag ? Variant.Filled : Variant.Outlined)"
+                                 Color="@(User.HasProximityTag ? Color.Info : Color.Default)"
+                                 Icon="@(User.HasProximityTag ? Icons.Material.Filled.Check : null)">
+                            Proximity Tag
+                        </MudChip>
+                    </MudStack>
+                    @if (User.UserIndex != 1)
+                    {
+                        <MudTooltip Text="Immediately writes the disable sentinel to this slot. The panel will clear attributes and partitions. Any unsaved edits on this dialog will be discarded.">
+                            <MudButton Variant="Variant.Filled" Color="Color.Error"
+                                       StartIcon="@Icons.Material.Filled.Block"
+                                       OnClick="DisableAsync"
+                                       Disabled="_busy">
+                                Disable
+                            </MudButton>
+                        </MudTooltip>
+                    }
+                </MudStack>
 
-            @* ── Code Configuration (read-only) ── *@
-            <MudText Typo="Typo.subtitle2">Code Configuration</MudText>
-            <MudStack Row="true" Spacing="4">
-                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
-                         Color="@(User.HasProximityTag ? Color.Info : Color.Default)">
-                    @(User.HasProximityTag ? "Proximity Tag" : "PIN Only")
-                </MudChip>
-                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="align-self-center">
-                    (read-only)
-                </MudText>
-            </MudStack>
+                <MudDivider />
 
-            @* ── Partition Assignments ── *@
-            <MudText Typo="Typo.subtitle2">Partition Assignments</MudText>
-            <MudStack Row="true" Spacing="2">
-                @for (int p = 0; p < _partitionAssigned.Length; p++)
-                {
-                    var idx = p;
-                    <MudCheckBox T="bool"
-                                 @bind-Value="_partitionAssigned[idx]"
-                                 Label="@($"P{idx + 1}")"
-                                 Dense="true" />
-                }
+                @* User Label *@
+                <MudTextField T="string" @bind-Value="_label" Label="User Label"
+                              Variant="Variant.Outlined" MaxLength="14" />
+
+                @* Access Code *@
+                <MudTextField T="string" @bind-Value="_code" Label="Access Code"
+                              Variant="Variant.Outlined"
+                              InputType="@(_revealCode ? InputType.Text : InputType.Password)"
+                              InputMode="InputMode.numeric"
+                              MaxLength="8"
+                              Validation="@((string? c) => ValidateCode(c))"
+                              HelperText="4, 6, or 8 digits"
+                              Immediate="true"
+                              Adornment="Adornment.End"
+                              AdornmentIcon="@(_revealCode ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                              OnAdornmentClick="() => _revealCode = !_revealCode"
+                              Style="font-family: 'Courier New', monospace;" />
+
+                @* Attributes *@
+                <MudText Typo="Typo.subtitle2">Attributes</MudText>
+                <MudStack Row="true" Spacing="4" Wrap="Wrap.Wrap">
+                    @foreach (var (flag, name) in AttributeFlags)
+                    {
+                        var f = flag;
+                        <MudCheckBox T="bool"
+                                     Value="@_attributes.HasFlag(f)"
+                                     ValueChanged="@(v => ToggleAttribute(f, v))"
+                                     Label="@name"
+                                     Dense="true" />
+                    }
+                </MudStack>
+
+                @* Partition Assignments *@
+                <MudText Typo="Typo.subtitle2">Partition Assignments</MudText>
+                <MudStack Row="true" Spacing="2">
+                    @for (int p = 0; p < _partitionAssigned.Length; p++)
+                    {
+                        var idx = p;
+                        <MudCheckBox T="bool"
+                                     @bind-Value="_partitionAssigned[idx]"
+                                     Label="@($"P{idx + 1}")"
+                                     Dense="true" />
+                    }
+                </MudStack>
             </MudStack>
-        </MudStack>
+        }
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel">Cancel</MudButton>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync" Disabled="@(_saving || !IsCodeValid(_code))">
-            @if (_saving)
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync"
+                   Disabled="@(_busy || !CanSave)">
+            @if (_busy)
             {
                 <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
             }
-            Save
+            @(_disabled ? "Enable" : "Save")
         </MudButton>
     </DialogActions>
 </MudDialog>
@@ -92,19 +140,31 @@
     [Parameter]
     public int MaxPartitions { get; set; }
 
+    // Enabled-view editable state
     private string _label = "";
     private string _code = "";
     private PanelUserAttributes _attributes;
     private bool[] _partitionAssigned = [];
+
+    // Disabled-view editable state (separate field so the display starts empty)
+    private string _newCode = "";
+
+    // Common UI state
     private bool _revealCode;
-    private bool _saving;
+    private bool _busy;
     private CancellationTokenSource? _cts;
 
-    // Snapshots for dirty-check write
+    // Dirty-check snapshots for the enabled-view Save path
     private string _origLabel = "";
     private string _origCode = "";
     private PanelUserAttributes _origAttributes;
     private bool[] _origPartitionAssigned = [];
+
+    // Authoritative disabled state follows whatever the panel most recently reported.
+    private bool _disabled => User.IsDisabled;
+
+    // Save button enablement depends on which view is active.
+    private bool CanSave => _disabled ? IsCodeValid(_newCode) : IsCodeValid(_code);
 
     private static readonly (PanelUserAttributes flag, string name)[] AttributeFlags =
     [
@@ -116,10 +176,18 @@
         (PanelUserAttributes.OneTimeUse,    "One-Time Use"),
     ];
 
-    protected override void OnParametersSet()
+    protected override void OnParametersSet() => SyncFromUser();
+
+    /// <summary>
+    /// Populates the editable fields and dirty-check snapshots from <see cref="User"/>.
+    /// Called on initial dialog open and after each Disable/Enable/Save refresh.
+    /// </summary>
+    private void SyncFromUser()
     {
         _label = User.UserLabel ?? "";
-        _code = User.CodeValue ?? "";
+        // Enabled view binds to the real stored code; disabled view uses _newCode starting empty.
+        _code = User.IsDisabled ? "" : (User.CodeValue ?? "");
+        _newCode = "";
         _attributes = User.Attributes;
 
         _partitionAssigned = new bool[MaxPartitions];
@@ -129,7 +197,6 @@
                 _partitionAssigned[p - 1] = true;
         }
 
-        // Snapshot for dirty checking
         _origLabel = _label;
         _origCode = _code;
         _origAttributes = _attributes;
@@ -139,34 +206,65 @@
     private void ToggleAttribute(PanelUserAttributes flag, bool set) =>
         _attributes = set ? _attributes | flag : _attributes & ~flag;
 
+    /// <summary>4, 6, or 8 numeric digits. Anything else is invalid.</summary>
     private static bool IsCodeValid(string? code)
     {
-        if (string.IsNullOrEmpty(code)) return true; // empty clears the code
-        if (code.Length != 4 && code.Length != 6) return false;
+        if (string.IsNullOrEmpty(code)) return false;
+        if (code.Length != 4 && code.Length != 6 && code.Length != 8) return false;
         foreach (var ch in code)
             if (ch < '0' || ch > '9') return false;
         return true;
     }
 
     private static string? ValidateCode(string? code) =>
-        IsCodeValid(code) ? null : "Access code must be 4 or 6 digits";
+        IsCodeValid(code) ? null : "Access code must be 4, 6, or 8 digits";
 
-    private async Task SaveAsync()
+    // ── Disable (immediate write, no Save required) ──
+
+    private async Task DisableAsync()
     {
-        if (!IsCodeValid(_code))
-        {
-            Snackbar.Add("Access code must be 4 or 6 digits", Severity.Warning);
-            return;
-        }
-
-        _saving = true;
+        if (_busy) return;
+        _busy = true;
         StateHasChanged();
 
         _cts ??= new CancellationTokenSource();
-
         try
         {
-            // TrimEnd only — preserve any intentional leading whitespace on keypad labels.
+            var result = await UserService.DisableUserAsync(SessionId, User.UserIndex, _cts.Token);
+            HandleCrossingResult(result, disableRequested: true);
+        }
+        catch (OperationCanceledException) { /* dialog closed */ }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+            StateHasChanged();
+        }
+    }
+
+    // ── Save (enabled view: normal save, disabled view: enable) ──
+
+    private async Task SaveAsync()
+    {
+        if (_busy || !CanSave) return;
+
+        _busy = true;
+        StateHasChanged();
+
+        _cts ??= new CancellationTokenSource();
+        try
+        {
+            if (_disabled)
+            {
+                var result = await UserService.EnableUserAsync(SessionId, User.UserIndex, _newCode, _cts.Token);
+                HandleCrossingResult(result, disableRequested: false);
+                return;
+            }
+
+            // Enabled view: normal dirty-check save.
             var trimmedLabel = string.IsNullOrWhiteSpace(_label) ? null : _label.TrimEnd();
             var origTrimmedLabel = string.IsNullOrWhiteSpace(_origLabel) ? null : _origLabel.TrimEnd();
 
@@ -175,10 +273,9 @@
                 UserIndex = User.UserIndex,
                 UserLabel = trimmedLabel,
                 CodeValue = _code,
-                CodeLength = User.CodeLength, // panel-reported value; not derived from typed text
+                CodeLength = User.CodeLength,
                 Attributes = _attributes,
                 Partitions = BuildPartitionList(),
-                IsActive = _attributes != PanelUserAttributes.None,
                 HasProximityTag = User.HasProximityTag,
             };
 
@@ -190,34 +287,52 @@
                 CodeLength = User.CodeLength,
                 Attributes = _origAttributes,
                 Partitions = BuildPartitionList(_origPartitionAssigned),
-                IsActive = _origAttributes != PanelUserAttributes.None,
                 HasProximityTag = User.HasProximityTag,
             };
 
-            var result = await UserService.WriteUserAsync(SessionId, edited, original, _cts.Token);
+            var writeResult = await UserService.WriteUserAsync(SessionId, edited, original, _cts.Token);
 
-            if (result.Success)
+            if (writeResult.Success)
             {
                 Snackbar.Add($"User {User.UserIndex} saved", Severity.Success);
                 MudDialog.Close(DialogResult.Ok(true));
             }
             else
             {
-                Snackbar.Add($"Save failed: {result.ErrorMessage}", Severity.Error);
+                Snackbar.Add($"Save failed: {writeResult.ErrorMessage}", Severity.Error);
             }
         }
-        catch (OperationCanceledException)
-        {
-            // Dialog closed mid-save; swallow.
-        }
+        catch (OperationCanceledException) { /* dialog closed */ }
         catch (Exception ex)
         {
             Snackbar.Add($"Error: {ex.Message}", Severity.Error);
         }
         finally
         {
-            _saving = false;
+            _busy = false;
             StateHasChanged();
+        }
+    }
+
+    private void HandleCrossingResult(PanelUserWriteResult result, bool disableRequested)
+    {
+        if (!result.Success || result.UpdatedUser is null)
+        {
+            Snackbar.Add($"Failed: {result.ErrorMessage}", Severity.Error);
+            return;
+        }
+
+        User = result.UpdatedUser;
+        SyncFromUser();
+
+        // Only toast on disable — the dialog visibly collapses, but it's worth surfacing the
+        // panel-side attribute/partition clear. On enable, the dialog visibly expands into the
+        // full editor, which is enough signal on its own.
+        if (disableRequested)
+        {
+            Snackbar.Add(
+                $"User {User.UserIndex} disabled. Panel-side attributes and partitions were cleared.",
+                Severity.Info);
         }
     }
 
