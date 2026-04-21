@@ -17,222 +17,181 @@ A real-time web portal for monitoring and controlling DSC PowerSeries NEO alarm 
 
 ### Docker Compose (Recommended)
 
-1. Create a `docker-compose.yml` file:
+1. Clone the repository (or download the `docker-compose.yml`):
 
 ````````
-version: '3.4'
+git clone https://github.com/BrianHumlicek/NeoHub.git
+cd NeoHub
+````````
+
+<details>
+<summary>docker-compose.yml</summary>
+
+````````yaml
+version: '3.8'
 
 services:
-  NeoHub:
-    image: ghcr.io/brianhumlicek/NeoHub:latest
-    container_name: NeoHub
+  neohub:
+    image: ghcr.io/brianhumlicek/neohub:latest
+    container_name: neohub
     ports:
-      - "5181:8080"     # HTTP Web UI
-      - "7013:8443"     # HTTPS Web UI
-      - "3072:3072"     # Panel ITv2 connection
+      - "8080:5181"
+      - "8443:8181"
+      - "3072:3072"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - EnableHttps=false
     volumes:
-      - NeoHub:/app/persist
+      - ./persist:/app/persist
     restart: unless-stopped
-
-volumes:
-  NeoHub_persist:
 ````````
 
-2. Create a `userSettings.json` file (see [Configuration](#-configuration) below)
-
-3. Start the container:
-
-````````
-docker-compose up -d
-````````
-
-4. Access the UI at `http://localhost:5181` or `https://localhost:7013`
+</details>
 
 ### Docker Run
 
 Alternatively, you can run the container directly using the Docker CLI:
 
 ````````
-docker run -d --name NeoHub \
-  -p 5181:8080 \
-  -p 7013:8443 \
+docker run -d --name neohub \
+  -p 8080:5181 \
+  -p 8443:8181 \
   -p 3072:3072 \
-  -v ./userSettings.json:/app/userSettings.json \
-  -v NeoHub_persist:/app/persist \
-  ghcr.io/brianhumlicek/NeoHub:latest
+  -e ASPNETCORE_ENVIRONMENT=Production \
+  -e ASPNETCORE_URLS=http://+:8080 \
+  -e EnableHttps=false \
+  -v ./persist:/app/persist \
+  ghcr.io/brianhumlicek/neohub:latest
 ````````
 
-## 🔧 Configuration
+### Getting Started
 
-NeoHub requires configuration to connect to your DSC panel. These settings can be configured in two ways:
+2. Start the container:
 
-1. **Via the Web UI** (Recommended): Navigate to the **Settings** page after startup
-2. **Via JSON file**: Create/edit `userSettings.json` in the application directory
-
-### Required Settings
-
-The IntegrationIdentificationNumber and at least one of the access codes **must** be configured for NeoHub to work correctly: If you only use one access code, you must ensure the encryption type [851][425,452,479,506]bit4 is set for the corresponding access code type. If you are unsure about the encryption type, then make sure you have both access codes configured.
-
-| Setting | Description | Format | Example |
-|---|---|---|---|
-| `IntegrationIdentificationNumber` | Integration ID from your panel (read from `[851][422]`) | 12 digits | `123456789012` |
-| `IntegrationAccessCodeType1` | Type 1 encryption code (programmed in `[851][423,450,477,504]`) | 8 digits | `12345678` |
-| `IntegrationAccessCodeType2` | Type 2 encryption key (programmed in `[851][700-703]`) | 32-character hex string | `1234...` (32 chars) |
-
-### Optional Settings
-
-| Setting | Description | Format | Default |
-|---|---|---|---|
-| `ListenPort` | TCP port for panel connections | 1-65535 | `3072` |
-
-### Sample Configuration File
-
-````````json
-{
-  "DSC.TLink": {
-    "IntegrationIdentificationNumber": "123456789012",
-    "IntegrationAccessCodeType1": "12345678",
-    "IntegrationAccessCodeType2": "12345678123456781234567812345678",
-    "ListenPort": 3072
-  }
-}
+````````
+docker-compose up -d
 ````````
 
-> **💡 Tip:** The easiest way to configure NeoHub is via the **Settings** page in the web UI after startup. Changes are automatically saved to `userSettings.json`.
+3. Verify the UI is accessible at `http://localhost:8080` — you should see the Connections page:
+
+   ![NeoHub Connections page before configuration](docs/images/connections-no-config.jpg)
+
+4. Gather the information needed for panel programming (see [Before You Begin](#before-you-begin))
 
 ---
 
 ## 🔧 DSC Panel Programming
 
-The DSC PowerSeries NEO panel must be programmed to connect to your NeoHub instance. All programming is done in **Installer Mode**.
+Before configuring NeoHub, your DSC PowerSeries NEO panel must be programmed to connect to your NeoHub server. All programming is done in **Installer Mode**.
+
+### Before You Begin
+
+Before opening the panel keypad, gather the following information and have something to write with — you will need to record values from the panel during programming.
+
+#### What you need to know
+
+- [ ] **Installer Code** — The default is `5555`. If that doesn't work, contact whoever originally commissioned the panel. A factory reset will restore the default, but will erase all existing programming and may disrupt any monitoring services currently connected to the panel.
+- [ ] **NeoHub server IP address** — The IP address of the machine running NeoHub, reachable from the panel's network.
+- [ ] **NeoHub listen port** — Default is `3072`. Only needed if you changed it.
+- [ ] **Existing integrations** — Determine if any integration slots are already in use (e.g., Alarm.com, NEO Go, or other monitoring services). You will need to choose an unused slot to avoid disrupting existing services. If you are unsure, your monitoring provider or installer can tell you.
+- [ ] **Firmware version** — The instructions below are written for **firmware v5.0+**. Communicator boards with older firmware (e.g., v4.1) use different subsection numbers and a different configuration process. If your panel has firmware prior to v5.0, see [Firmware v4.1 Configuration](#firmware-v41-configuration) instead.
+
+#### What you will record from the panel
+
+Have a place to write down these values — you will enter them into NeoHub's Settings page after programming:
+
+- [ ] **Integration ID** (`[851][422]`) — A 12-digit read-only identifier unique to your panel
+- [ ] **Type 2 Access Code** — The 32-character hex key you program for your chosen integration slot (only if you change it from the default)
 
 ### Entering Installer Mode
 
-1. Enter `*8` on the panel keypad
-2. Enter your **Installer Code** (default is usually `5555`)
-3. Navigate to section **[851]** (Integration / Alternate Communicator)
+Once you have the information above and a way to write down settings from the panel, go to your alarm keypad.
 
-### Understanding Tags
+1. **Enter Installer Configuration:** Press `*` `8` followed by your Installer Code (e.g., `*` `8` `5` `5` `5` `5` for the default)
+2. **Navigate to the Alt Communicator section:** Enter `851`
+3. **Read the Integration ID (`[422]`):**
+   - Enter subsection `422`
+   - The display will show the first 6 digits of your Integration ID — use the **right arrow** to scroll and reveal the remaining 6 digits (scrolling past the end will exit the subsection)
+   - Write down all 12 digits and label it **Integration Identification Number `[851][422]`**
+4. **Choose your integration group:**
 
-DSC panels organize programming into **sections** and **tags**:
+   The panel supports **4 integration groups**, each allowing a separate integration server (e.g., Alarm.com, NEO Go, NeoHub) to be configured independently. All groups share the same Integration ID (`[422]`), but every other subsection has its own copy per group. The subsection numbers for each group are offset by 27:
 
-- **Sections** (e.g., `[851]`) are groups of related settings
-- **Tags** (e.g., `[422]`, `[423]`) are individual fields within a section
-- Some settings span multiple tags (e.g., Type 2 encryption uses tags `[700]` through `[703]`)
+   | Parameter               | Group 1 | Group 2 | Group 3 | Group 4 |
+   |-------------------------|---------|---------|---------|---------|
+   | Type 1 Access Code      |   `423` |   `450` |   `477` |   `504` |
+   | Integration Options     |   `425` |   `452` |   `479` |   `506` |
+   | Polling / Notifications |   `426` |   `453` |   `480` |   `507` |
+   | Server IP Address       |   `428` |   `455` |   `482` |   `509` |
+   | Server Port             |   `429` |   `456` |   `483` |   `510` |
+   | Type 2 Access Code      |   `700` |   `701` |   `702` |   `703` |
 
-### Multiple Integration Support
+   > ⚠️ **If you have a third-party service** (e.g., Alarm.com) already configured on your panel, it is using one of these groups. **Do not overwrite its settings.** Pick an unused group for NeoHub. If you are unsure which groups are in use, navigate to each group's Server IP subsection (e.g., `428`, `455`, `482`, `509`) — a non-zero IP address means that group is in use. Write down any existing values before making changes so you can restore them if needed.
 
-DSC Communicators with **firmware v5.0+** support up to **4 separate integrations** running simultaneously. This allows you to use multiple services at the same time, such as:
+   The remaining steps use **Group 1** subsection numbers. If you are using a different group, substitute the corresponding subsection number from the table above.
 
-- **Integration 1:** Professional monitoring (e.g., Alarm.com)
-- **Integration 2:** Mobile app (e.g., NEO Go)
-- **Integration 3:** NeoHub server
-- **Integration 4:** Custom integration
+5. **Configure integration options (`[425,452,479,506]`):**
+   - Enter subsection `425` (or the corresponding subsection for your group)
+   - This controls encryption type and connection method for your integration slot
+   - Ensure bits **3**, **4**, and **5** are set, and all other bits are clear
+   - Toggle a bit by pressing its number on the keypad — the display should read `--345---` when correct
+   - Press `#` to save and return to the subsection menu
+6. **Configure polling and notification options (`[426,453,480,507]`):**
+   - Enter subsection `426` (or the corresponding subsection for your group)
+   - This controls integration polling method, real-time notification enablement, and notification port selection
+   - Ensure only bit **3** is set — the display should read `--3-----`
+   - Press `#` to save and return to the subsection menu
+7. **Set the Integration Server IP address (`[428,455,482,509]`):**
+   - Enter subsection `428` (or the corresponding subsection for your group)
+   - Enter the IP address of your NeoHub server, 3 digits at a time, using the **right arrow** to advance to the next octet (e.g., for `192.168.1.100` enter `192` → ▶ → `168` → ▶ → `001` → ▶ → `100`)
+   - Press `#` to save and return to the subsection menu
+8. **Set the Integration Server port (`[429,456,483,510]`):**
+   - Enter subsection `429` (or the corresponding subsection for your group)
+   - This sets the port of the NeoHub server in hexadecimal — the default is `0C00` (3072 in decimal)
+   - If you haven't changed the listen port in NeoHub, the default should already be correct
+   - Press `#` to save and return to the subsection menu
+9. **Set the Type 2 Access Code (`[700,701,702,703]`):**
+    - Enter subsection `700` (or the corresponding subsection for your group)
+    - This is a 32-character hex key used to encrypt traffic between the panel and NeoHub server
+    - The factory default is `12345678123456781234567812345678` — NeoHub will connect automatically if this is left unchanged
+    - The value is entered 8 characters at a time, using the **right arrow** to advance through all 32 characters
+    - If you want to change it, be sure to write down the full 32-character value — you will need it when configuring the NeoHub server
+    - Press `#` to save and return to the subsection menu
+10. **Exit Installer Mode:** Press `*` `9` `9`
 
-#### Understanding Multi-Slot Parameters
+> ⚠️ **Critical:** The values you recorded from the panel (Integration ID and Type 2 Access Code) **must exactly match** what you enter into NeoHub's Settings page. If any value is wrong, the panel will not connect.
 
-When viewing DSC programming documentation, you'll notice that **many configuration parameters** have **4 tag numbers** listed in brackets. This indicates that each integration slot has its own separate configuration for that parameter. 
+<details>
+<summary><h3>Firmware v4.1 Configuration</h3></summary>
 
-For example, when you see:
-- **Type 1 Access Code `[851][423,450,477,504]`**
+> ⚠️ This firmware version is still under testing. The subsection numbers differ from v5.0+.
 
-This means there are 4 separate Type 1 Access Code fields:
-  - Integration 1: `[851][423]`
-  - Integration 2: `[851][450]`
-  - Integration 3: `[851][477]`
-  - Integration 4: `[851][504]`
+| Subsection | Description | Notes |
+|---|---|---|
+| `[851][001]` | Panel Static IP address | |
+| `[851][002]` | Panel Subnet mask | |
+| `[851][003]` | Panel Gateway | |
+| `[851][651]` | Panel Integration ID | Read-only |
+| `[851][652]` | Access code | Default: `12345678` |
+| `[851][664]` | Options | Keep only option 3 on |
+| `[851][693]` | NeoHub server address | |
+| `[851][697]` | DNS name | Clear this field (optional) |
+| `[851][999]` | Restart | Enter `55` to restart |
 
-This pattern applies to **multiple configuration parameters** in section `[851]`, not just the access codes. Each integration can have its own unique values for various settings, allowing different services to coexist with different configurations.
+**NeoHub settings for v4.1:**
+- Only the **Type 1 Access Code** is needed (from `[851][652]`)
+- Integration ID (from `[851][651]`)
+- Server port
 
-> ⚠️ **Important:** Before programming NeoHub, determine which integration slots are already in use by existing services. Choose an available slot to avoid conflicts.
+</details>
 
-> 📖 **Note:** The **Integration ID** (`[851][422]`) is **read-only** and **shared across all integrations**. You must copy this value from your panel and enter it into NeoHub's settings.
+### Next Steps
 
-#### Firmware Compatibility
+Once the panel has been configured, return to the NeoHub web UI. If everything is working, you should see a new connection appear on the **Connections** page.
 
-- **Firmware v5.0+:** Supports 4 integration slots as described above
-- **Firmware prior to v5.0:** Only supports **1 integration slot**, and some programming tag numbers are different
-
-> 📚 **Legacy Firmware Reference:** If you have firmware older than v5.0, refer to the [NEO Go Installation Guide](https://github.com/BrianHumlicek/DSC-TLink) in the DSC.TLink repository for details on the different tag mappings for older firmware versions.
-
-### Required Programming
-
-> 📋 **Note:** This guide assumes **firmware v5.0+**. For older firmware, tag numbers may differ - see the [firmware compatibility](#firmware-compatibility) section above.
-
-Program the following tags in section **[851]** for your chosen integration slot:
-
-| Tag | Name | Description | Example |
-|---|---|---|---|
-| `[422]` | Integration ID (Read-Only) | 12-digit identifier shared by all integrations - **copy to NeoHub settings** | `123456789012` |
-| `[423,450,477,504]` | Type 1 Access Code (per integration) | 8-digit code for your chosen integration slot | `12345678` |
-| `[700,701,702,703]` | Type 2 Access Code (per integration) | 32-character hex key for your chosen integration slot | See programming steps |
-
-> 💡 **Tip:** Each integration slot has additional configuration parameters beyond just the Type 1 Access Code. Consult your panel's programming guide or the DSC Integration manual for a complete list of per-integration settings.
-
-### Programming Steps
-
-1. **Enter Installer Mode:** `*8` → Installer Code → `[851]`
-
-2. **Read Integration ID (`[422]`):**
-   - Navigate to tag `[422]`
-   - **Note:** This field is read-only and displays your panel's unique 12-digit Integration ID
-   - Write down this value - you'll need to enter it in NeoHub's settings
-   - Example: `123456789012`
-
-3. **Select Your Integration Slot:**
-   - Choose an available integration slot (1-4) that isn't already in use
-   - Use `[423]` for Integration 1, `[450]` for Integration 2, `[477]` for Integration 3, or `[504]` for Integration 4
-
-4. **Program Type 1 Access Code:**
-   - Navigate to your chosen integration tag (e.g., `[423]` for Integration 1)
-   - Enter your 8-digit Type 1 code (e.g., `12345678`)
-   - Press `#` to save
-   - **Important:** Remember which slot you used and the code you entered
-
-5. **Program Type 2 Access Code (`[700]`-`[703]`):**
-   - **Note:** Type 2 Access Code tags are specific to each integration slot
-   - For your chosen integration slot, navigate to the appropriate starting tag
-   - The 32-character hex key is split into 4 segments of 8 characters each
-   - Navigate to tag `[700]` (adjust based on your integration slot)
-   - Enter characters 1-8 of your 32-character hex key
-   - Press `#` and navigate to `[701]`
-   - Enter characters 9-16
-   - Press `#` and navigate to `[702]`
-   - Enter characters 17-24
-   - Press `#` and navigate to `[703]`
-   - Enter characters 25-32
-   - Press `#` to save
-
-6. **Configure Network Settings:**
-   - Set the panel's IP address for the NeoHub server (section `[801]`)
-   - Set the port to `3072` (or your configured `ListenPort`)
-
-7. **Exit Installer Mode:** Press `*99`
-
-> ⚠️ **Critical:** The values programmed in the panel **must exactly match** the values in your `userSettings.json` file.
-
-**🔧Firmware v4.1 configuration🔧**
-- After testing this seems to be all the settings that needs to be configured 
-- This version is still under some testing stages.
-
-  - `[851][001]` Panel Static IP address
-  - `[851][002]` Panel Subnet mask
-  - `[851][003]` Panel Gateway
-  - `[851][651]` Panel Integration ID
-  - `[851][652]` Access code (12345678) *default*
-  - `[851][664]` keep only option 3 on
-  - `[851][693]` NeoHub server address
-  - `[851][697]` Clear DNS name (Optional)
-  - `[851][999]` 55 (restart)
-
-**NeoHub settings**
-  - Only **Type 1 access code** is needed *([851][652]])*.
-  - Integration ID
-  - Server port
-
-*end of v4.1 configuration*
-
----
+- **If you left the default access codes unchanged**, NeoHub will automatically connect and create settings for that connection — no further action is needed.
+- **If you changed the Type 2 Access Code**, NeoHub will detect the connection but prompt you to update the access code. Navigate to the connection's settings, enter the Type 2 Access Code you recorded, and save. Once saved, the panel should connect successfully.
 
 ## 🏗️ Architecture
 

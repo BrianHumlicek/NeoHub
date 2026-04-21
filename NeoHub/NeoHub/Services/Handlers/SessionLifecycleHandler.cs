@@ -1,3 +1,4 @@
+using DSC.TLink.ITv2;
 using DSC.TLink.ITv2.MediatR;
 using MediatR;
 
@@ -12,18 +13,25 @@ namespace NeoHub.Services.Handlers
     {
         private readonly ISessionMonitor _monitor;
         private readonly IPanelStateService _panelState;
+        private readonly IConnectionSettingsProvider _settingsProvider;
         private readonly ILogger<SessionLifecycleHandler> _logger;
 
-        public SessionLifecycleHandler(ISessionMonitor monitor, IPanelStateService panelState, ILogger<SessionLifecycleHandler> logger)
+        public SessionLifecycleHandler(
+            ISessionMonitor monitor,
+            IPanelStateService panelState,
+            IConnectionSettingsProvider settingsProvider,
+            ILogger<SessionLifecycleHandler> logger)
         {
             _monitor = monitor;
             _panelState = panelState;
+            _settingsProvider = settingsProvider;
             _logger = logger;
         }
 
         public Task Handle(SessionConnectedNotification notification, CancellationToken cancellationToken)
         {
             _logger.LogInformation("Session connected");
+            _settingsProvider.ConfirmDefaults(notification.SessionId);
             _monitor.NotifyChanged();
             return Task.CompletedTask;
         }

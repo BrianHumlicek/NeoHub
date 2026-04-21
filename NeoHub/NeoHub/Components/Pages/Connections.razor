@@ -133,6 +133,36 @@
                                                      Variant="Variant.Outlined"
                                                      Margin="Margin.Dense" />
                                 </MudItem>
+                                <MudItem xs="12" sm="6">
+                                    <MudTextField T="string"
+                                                  Label="Default Access Code"
+                                                  Value="@(conn.DefaultAccessCode ?? "")"
+                                                  ValueChanged="@(v => conn.DefaultAccessCode = string.IsNullOrWhiteSpace(v) ? null : v)"
+                                                  HelperText="Access code for arm/disarm/bypass (factory default: 1234)"
+                                                  Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense"
+                                                  InputType="InputType.Password" />
+                                </MudItem>
+                                <MudItem xs="12" sm="6">
+                                    <MudTextField T="string"
+                                                  Label="Installer Code"
+                                                  Value="@(conn.InstallerCode ?? "")"
+                                                  ValueChanged="@(v => conn.InstallerCode = string.IsNullOrWhiteSpace(v) ? null : v)"
+                                                  HelperText="Installer code for config access (factory default: 5555)"
+                                                  Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense"
+                                                  InputType="InputType.Password" />
+                                </MudItem>
+                                <MudItem xs="12" sm="6">
+                                    <MudTextField T="string"
+                                                  Label="Master Code"
+                                                  Value="@(conn.MasterCode ?? "")"
+                                                  ValueChanged="@(v => conn.MasterCode = string.IsNullOrWhiteSpace(v) ? null : v)"
+                                                  HelperText="Master code for user management (factory default: 1234)"
+                                                  Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense"
+                                                  InputType="InputType.Password" />
+                                </MudItem>
                             </MudGrid>
                             <MudStack Row="true" Spacing="2" Class="mt-3">
                                 <MudButton Variant="Variant.Filled"
@@ -207,6 +237,9 @@
 </MudContainer>
 
 @code {
+    [SupplyParameterFromQuery(Name = "expand")]
+    public string? ExpandSessionId { get; set; }
+
     private List<ConnectionSettings> connections = new();
     private HashSet<string> activeSessions = new();
     private HashSet<string> visibleFields = new();
@@ -219,6 +252,8 @@
     protected override void OnInitialized()
     {
         RefreshData();
+        if (!string.IsNullOrEmpty(ExpandSessionId))
+            expandedSettings = ExpandSessionId;
         SessionMonitor.SessionsChanged += OnSessionsChanged;
         PanelState.SessionStateChanged += OnStateChanged;
         UpdateRefreshTimer();
