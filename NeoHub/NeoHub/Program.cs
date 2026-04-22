@@ -71,6 +71,7 @@ namespace NeoHub
             builder.Services.AddSingleton<IPanelUserService, PanelUserService>();
             builder.Services.AddSingleton<IPanelConfigurationService, PanelConfigurationService>();
             builder.Services.AddSingleton<IPanelConfigFileService, PanelConfigFileService>();
+            builder.Services.AddSingleton<IPanelAccessCodeService, PanelAccessCodeService>();
             builder.Services.AddSingleton<ISessionMonitor, SessionMonitor>();
             builder.Services.AddSingleton<IConnectionSettingsProvider, ConnectionSettingsProvider>();
 

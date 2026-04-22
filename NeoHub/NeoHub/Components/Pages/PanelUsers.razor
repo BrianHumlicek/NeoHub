@@ -13,6 +13,7 @@
 @inject IDialogService DialogService
 @inject NavigationManager Navigation
 @inject IOptionsMonitor<PanelConnectionsSettings> ConnectionSettings
+@inject IPanelAccessCodeService AccessCodeService
 @implements IDisposable
 
 <PageTitle>Panel Users</PageTitle>
@@ -321,6 +322,9 @@
         var masterCode = await ResolveMasterCodeAsync();
         if (masterCode is null) return;
 
+        // Capture pre-edit code so we can sync cached/persisted master code after save.
+        var originalCode = user.CodeValue;
+
         var statusText = user.IsDisabled
             ? " — Disabled"
             : user.IsActive
@@ -340,7 +344,43 @@
         if (result?.Canceled == false)
         {
             _session = PanelState.GetSession(_sessionId);
+
+            // If the master user's code was just changed, keep our cache and connection settings
+            // in sync — otherwise subsequent user operations will fail using the old master code.
+            if (user.UserIndex == 1)
+            {
+                var newCode = _session?.Users.TryGetValue(1, out var updated) == true
+                    ? updated.CodeValue
+                    : null;
+                if (newCode != originalCode)
+                    await SyncMasterCodeAsync(newCode);
+            }
+
             StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// Updates the cached master code and the persisted <see cref="ConnectionSettings"/> after a
+    /// successful write to user 1 on the panel. Called only when user 1's code actually changed.
+    /// </summary>
+    private async Task SyncMasterCodeAsync(string? newCode)
+    {
+        if (_sessionId is null) return;
+
+        // Update in-memory cache so further operations in this session use the new code.
+        _masterCode = string.IsNullOrEmpty(newCode) ? null : newCode;
+
+        try
+        {
+            var persisted = await AccessCodeService.UpdateConnectionCodeAsync(
+                _sessionId, PanelAccessCodeKind.Master, newCode);
+            if (persisted)
+                Snackbar.Add("Master code updated in connection settings", Severity.Info);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to persist master code: {ex.Message}", Severity.Warning);
         }
     }
 
