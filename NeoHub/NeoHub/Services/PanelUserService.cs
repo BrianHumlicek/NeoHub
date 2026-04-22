@@ -128,6 +128,13 @@ namespace NeoHub.Services
             bool partsDirty = !user.Partitions.SequenceEqual(original.Partitions);
             bool labelDirty = user.UserLabel != original.UserLabel;
 
+            // The panel does not allow writing attributes or partitions for User 1 (master code).
+            if (user.UserIndex == 1)
+            {
+                attrsDirty = false;
+                partsDirty = false;
+            }
+
             // On a crossing save, only the access code is written. All other dirty edits are
             // ignored so we never fight the panel's post-crossing reset.
             bool writeAttrs = !crossed && attrsDirty;

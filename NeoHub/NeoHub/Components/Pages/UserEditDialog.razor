@@ -86,7 +86,13 @@
                               Style="font-family: 'Courier New', monospace;" />
 
                 @* Attributes *@
-                <MudText Typo="Typo.subtitle2">Attributes</MudText>
+                <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+                    <MudText Typo="Typo.subtitle2">Attributes</MudText>
+                    @if (User.UserIndex == 1)
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">(read-only for master user)</MudText>
+                    }
+                </MudStack>
                 <MudStack Row="true" Spacing="4" Wrap="Wrap.Wrap">
                     @foreach (var (flag, name) in AttributeFlags)
                     {
@@ -95,12 +101,19 @@
                                      Value="@_attributes.HasFlag(f)"
                                      ValueChanged="@(v => ToggleAttribute(f, v))"
                                      Label="@name"
-                                     Dense="true" />
+                                     Dense="true"
+                                     Disabled="@(User.UserIndex == 1)" />
                     }
                 </MudStack>
 
                 @* Partition Assignments *@
-                <MudText Typo="Typo.subtitle2">Partition Assignments</MudText>
+                <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+                    <MudText Typo="Typo.subtitle2">Partition Assignments</MudText>
+                    @if (User.UserIndex == 1)
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">(read-only for master user)</MudText>
+                    }
+                </MudStack>
                 <MudStack Row="true" Spacing="2">
                     @for (int p = 0; p < _partitionAssigned.Length; p++)
                     {
@@ -108,7 +121,8 @@
                         <MudCheckBox T="bool"
                                      @bind-Value="_partitionAssigned[idx]"
                                      Label="@($"P{idx + 1}")"
-                                     Dense="true" />
+                                     Dense="true"
+                                     Disabled="@(User.UserIndex == 1)" />
                     }
                 </MudStack>
             </MudStack>
