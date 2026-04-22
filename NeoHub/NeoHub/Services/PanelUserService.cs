@@ -4,8 +4,6 @@ using DSC.TLink.ITv2.Enumerations;
 using DSC.TLink.ITv2.MediatR;
 using DSC.TLink.ITv2.Messages;
 using MediatR;
-using Microsoft.Extensions.Options;
-using NeoHub.Services.Settings;
 
 namespace NeoHub.Services
 {
@@ -13,7 +11,6 @@ namespace NeoHub.Services
     {
         private readonly IMediator _mediator;
         private readonly IPanelStateService _panelState;
-        private readonly IOptionsMonitor<PanelConnectionsSettings> _connectionSettings;
         private readonly ILogger<PanelUserService> _logger;
 
         /// <summary>
@@ -40,16 +37,26 @@ namespace NeoHub.Services
         public PanelUserService(
             IMediator mediator,
             IPanelStateService panelState,
-            IOptionsMonitor<PanelConnectionsSettings> connectionSettings,
             ILogger<PanelUserService> logger)
         {
             _mediator = mediator;
             _panelState = panelState;
-            _connectionSettings = connectionSettings;
             _logger = logger;
         }
 
-        public async Task<PanelUserReadResult> ReadAllAsync(string sessionId, CancellationToken ct)
+        public async Task<bool> VerifyMasterCodeAsync(string sessionId, string masterCode, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(masterCode)) return false;
+            if (_panelState.GetSession(sessionId) is null) return false;
+
+            if (!await EnterProgrammingModeAsync(sessionId, ProgrammingMode.AccessCodeProgramming, masterCode, readWrite: false, ct))
+                return false;
+
+            await ExitConfigModeAsync(sessionId, ct);
+            return true;
+        }
+
+        public async Task<PanelUserReadResult> ReadAllAsync(string sessionId, string masterCode, CancellationToken ct)
         {
             var session = _panelState.GetSession(sessionId);
             if (session == null)
@@ -58,12 +65,10 @@ namespace NeoHub.Services
             if (session.MaxUsers <= 0)
                 return new PanelUserReadResult(false, "Panel reported zero users");
 
-            _logger.LogInformation("Reading panel users for session {SessionId}, max users: {MaxUsers}", sessionId, session.MaxUsers);
-
-            // Access code commands require AccessCodeProgramming mode with the master code.
-            var masterCode = GetMasterCode(sessionId);
             if (string.IsNullOrWhiteSpace(masterCode))
-                return new PanelUserReadResult(false, "Master code not configured for this panel");
+                return new PanelUserReadResult(false, "Master code is required");
+
+            _logger.LogInformation("Reading panel users for session {SessionId}, max users: {MaxUsers}", sessionId, session.MaxUsers);
 
             session.IsReadingUsers = true;
             session.UserReadCurrent = 0;
@@ -80,7 +85,7 @@ namespace NeoHub.Services
                 // 2. Enter programming mode for access code commands
                 UpdateProgress(session, sessionId, "Entering programming mode…");
                 if (!await EnterProgrammingModeAsync(sessionId, ProgrammingMode.AccessCodeProgramming, masterCode, readWrite: false, ct))
-                    return new PanelUserReadResult(false, "Failed to enter programming mode");
+                    return new PanelUserReadResult(false, "Failed to enter programming mode — verify the master code is correct");
 
                 PanelUserReadResult result;
                 try
@@ -107,7 +112,7 @@ namespace NeoHub.Services
 
 
         public async Task<PanelUserWriteResult> WriteUserAsync(
-            string sessionId, Models.PanelUserState user, Models.PanelUserState original, CancellationToken ct)
+            string sessionId, Models.PanelUserState user, Models.PanelUserState original, string masterCode, CancellationToken ct)
         {
             // Detect enable/disable crossings. The panel has side-effects when the access code
             // crosses the enabled/disabled threshold (attributes and partitions get reset by the
@@ -132,9 +137,8 @@ namespace NeoHub.Services
             if (!codeDirty && !writeAttrs && !writeParts && !writeLabel)
                 return new PanelUserWriteResult(true) { UpdatedUser = user };
 
-            var masterCode = GetMasterCode(sessionId);
             if (string.IsNullOrWhiteSpace(masterCode))
-                return new PanelUserWriteResult(false, "Master code not configured for this panel");
+                return new PanelUserWriteResult(false, "Master code is required");
 
             if (!await EnterProgrammingModeAsync(sessionId, ProgrammingMode.AccessCodeProgramming, masterCode, readWrite: true, ct))
                 return new PanelUserWriteResult(false, "Failed to enter programming mode");
@@ -236,7 +240,7 @@ namespace NeoHub.Services
             }
         }
 
-        public Task<PanelUserWriteResult> DisableUserAsync(string sessionId, int userIndex, CancellationToken ct)
+        public Task<PanelUserWriteResult> DisableUserAsync(string sessionId, int userIndex, string masterCode, CancellationToken ct)
         {
             var session = _panelState.GetSession(sessionId);
             if (session is null || !session.Users.TryGetValue(userIndex, out var existing))
@@ -251,10 +255,10 @@ namespace NeoHub.Services
             edited.CodeLength = codeLength;
 
             // WriteUserAsync detects the crossing, writes the code only, re-reads the slot.
-            return WriteUserAsync(sessionId, edited, existing, ct);
+            return WriteUserAsync(sessionId, edited, existing, masterCode, ct);
         }
 
-        public Task<PanelUserWriteResult> EnableUserAsync(string sessionId, int userIndex, string newCode, CancellationToken ct)
+        public Task<PanelUserWriteResult> EnableUserAsync(string sessionId, int userIndex, string newCode, string masterCode, CancellationToken ct)
         {
             if (string.IsNullOrEmpty(newCode)
                 || (newCode.Length != 4 && newCode.Length != 6 && newCode.Length != 8)
@@ -271,7 +275,7 @@ namespace NeoHub.Services
             edited.CodeValue = newCode;
             edited.CodeLength = newCode.Length;
 
-            return WriteUserAsync(sessionId, edited, existing, ct);
+            return WriteUserAsync(sessionId, edited, existing, masterCode, ct);
         }
 
         /// <summary>
@@ -338,11 +342,6 @@ namespace NeoHub.Services
         }
 
         // ── Progress reporting ────────────────────────────────────────────
-
-        private string? GetMasterCode(string sessionId) =>
-            _connectionSettings.CurrentValue.Connections
-                .FirstOrDefault(c => string.Equals(c.SessionId, sessionId, StringComparison.OrdinalIgnoreCase))
-                ?.MasterCode;
 
         private void UpdateProgress(Models.SessionState session, string sessionId, string message)
         {

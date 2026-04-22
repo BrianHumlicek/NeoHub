@@ -165,6 +165,18 @@ public class PanelConfigurationService : IPanelConfigurationService
         }
     }
 
+    public async Task<bool> VerifyInstallerCodeAsync(string sessionId, string installerCode, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(installerCode)) return false;
+        if (_panelState.GetSession(sessionId) is null) return false;
+
+        var enterResult = await EnterConfigModeAsync(sessionId, installerCode, readWrite: false, ct);
+        if (!enterResult.Success) return false;
+
+        await ExitConfigModeAsync(sessionId, ct);
+        return true;
+    }
+
     private async Task ExitConfigModeAsync(string sessionId, CancellationToken ct)
     {
         try

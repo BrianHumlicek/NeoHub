@@ -1,0 +1,147 @@
+@* Shared operator prompt for panel access codes (installer, master, etc.).
+   Verifies the entered code against the panel before closing — if verification
+   fails, the dialog stays open with an inline error message so the operator
+   can correct it without a modal flicker. *@
+@implements IDisposable
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="3">
+            @if (!string.IsNullOrEmpty(_errorMessage))
+            {
+                <MudAlert Severity="Severity.Error" Dense="true">@_errorMessage</MudAlert>
+            }
+            <MudTextField T="string"
+                          @bind-Value="_code"
+                          Label="@Label"
+                          InputType="InputType.Password"
+                          InputMode="@InputMode"
+                          Variant="Variant.Outlined"
+                          AutoFocus="true"
+                          Immediate="true"
+                          MaxLength="@MaxLength"
+                          HelperText="@HelperText"
+                          Disabled="_verifying"
+                          Validation="@((string? c) => RunValidator(c))"
+                          OnKeyUp="OnKeyUp" />
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Disabled="_verifying">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   Disabled="@(!IsValid || _verifying)"
+                   OnClick="SubmitAsync">
+            @if (_verifying)
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+            }
+            Continue
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter]
+    public string Label { get; set; } = "Access Code";
+
+    [Parameter]
+    public string HelperText { get; set; } = "";
+
+    [Parameter]
+    public int MaxLength { get; set; } = 20;
+
+    [Parameter]
+    public InputMode InputMode { get; set; } = InputMode.text;
+
+    /// <summary>
+    /// Optional client-side format validator. Returns null on valid, or an error message on invalid.
+    /// Empty input is always treated as invalid for the purposes of enabling the Continue button.
+    /// </summary>
+    [Parameter]
+    public Func<string?, string?>? Validator { get; set; }
+
+    /// <summary>
+    /// Verifies the code against the panel. Returns true if the panel accepts it
+    /// (e.g. entering programming mode succeeds). On false, the dialog shows
+    /// <see cref="VerificationFailedMessage"/> and stays open for retry.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public Func<string, CancellationToken, Task<bool>> VerifyAsync { get; set; } = null!;
+
+    [Parameter]
+    public string VerificationFailedMessage { get; set; } = "Code rejected by panel. Please try again.";
+
+    private string? _code;
+    private string? _errorMessage;
+    private bool _verifying;
+    private CancellationTokenSource? _cts;
+
+    private bool IsValid
+    {
+        get
+        {
+            if (string.IsNullOrEmpty(_code)) return false;
+            return Validator is null || Validator(_code) is null;
+        }
+    }
+
+    // Only show the format error once the user has typed something; empty input shouldn't scold.
+    private string? RunValidator(string? code) =>
+        string.IsNullOrEmpty(code) ? null : Validator?.Invoke(code);
+
+    private async Task SubmitAsync()
+    {
+        if (_verifying || !IsValid || string.IsNullOrEmpty(_code)) return;
+
+        _verifying = true;
+        _errorMessage = null;
+        StateHasChanged();
+
+        _cts ??= new CancellationTokenSource();
+        try
+        {
+            var ok = await VerifyAsync(_code, _cts.Token);
+            if (ok)
+            {
+                MudDialog.Close(DialogResult.Ok(_code));
+                return;
+            }
+            _errorMessage = VerificationFailedMessage;
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancelled mid-verify; dialog closing.
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            _verifying = false;
+            StateHasChanged();
+        }
+    }
+
+    private void Cancel()
+    {
+        _cts?.Cancel();
+        MudDialog.Cancel();
+    }
+
+    private async Task OnKeyUp(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && IsValid && !_verifying)
+            await SubmitAsync();
+    }
+
+    public void Dispose()
+    {
+        _cts?.Cancel();
+        _cts?.Dispose();
+    }
+}

@@ -140,6 +140,9 @@
     [Parameter]
     public int MaxPartitions { get; set; }
 
+    [Parameter]
+    public string MasterCode { get; set; } = "";
+
     // Enabled-view editable state
     private string _label = "";
     private string _code = "";
@@ -230,7 +233,7 @@
         _cts ??= new CancellationTokenSource();
         try
         {
-            var result = await UserService.DisableUserAsync(SessionId, User.UserIndex, _cts.Token);
+            var result = await UserService.DisableUserAsync(SessionId, User.UserIndex, MasterCode, _cts.Token);
             HandleCrossingResult(result, disableRequested: true);
         }
         catch (OperationCanceledException) { /* dialog closed */ }
@@ -259,7 +262,7 @@
         {
             if (_disabled)
             {
-                var result = await UserService.EnableUserAsync(SessionId, User.UserIndex, _newCode, _cts.Token);
+                var result = await UserService.EnableUserAsync(SessionId, User.UserIndex, _newCode, MasterCode, _cts.Token);
                 HandleCrossingResult(result, disableRequested: false);
                 return;
             }
@@ -290,7 +293,7 @@
                 HasProximityTag = User.HasProximityTag,
             };
 
-            var writeResult = await UserService.WriteUserAsync(SessionId, edited, original, _cts.Token);
+            var writeResult = await UserService.WriteUserAsync(SessionId, edited, original, MasterCode, _cts.Token);
 
             if (writeResult.Success)
             {

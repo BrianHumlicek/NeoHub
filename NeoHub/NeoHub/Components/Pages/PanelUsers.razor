@@ -1,14 +1,18 @@
 @page "/panel-users"
 @using NeoHub.Services
 @using NeoHub.Services.Models
+@using NeoHub.Services.Settings
 @using DSC.TLink.ITv2.MediatR
 @using DSC.TLink.ITv2.Enumerations
+@using Microsoft.Extensions.Options
 @inject IPanelUserService UserService
 @inject IPanelStateService PanelState
 @inject IITv2SessionManager SessionManager
 @inject ISessionMonitor SessionMonitor
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
+@inject NavigationManager Navigation
+@inject IOptionsMonitor<PanelConnectionsSettings> ConnectionSettings
 @implements IDisposable
 
 <PageTitle>Panel Users</PageTitle>
@@ -167,6 +171,7 @@
 @code {
     private string? _sessionId;
     private SessionState? _session;
+    private string? _masterCode;
     private bool _localReading;
     private bool _revealCodes;
     private bool _showInactive;
@@ -227,13 +232,16 @@
         if (_sessionId is null || IsReading)
             return;
 
+        var masterCode = await ResolveMasterCodeAsync();
+        if (masterCode is null) return;
+
         _localReading = true;
         _lastResult = null;
         StateHasChanged();
 
         try
         {
-            _lastResult = await UserService.ReadAllAsync(_sessionId, CancellationToken.None);
+            _lastResult = await UserService.ReadAllAsync(_sessionId, masterCode, CancellationToken.None);
             _session = PanelState.GetSession(_sessionId);
 
             if (_lastResult.Success)
@@ -248,9 +256,70 @@
         }
     }
 
+    /// <summary>
+    /// Returns the master code for the current session. Uses the configured value if present;
+    /// otherwise prompts the operator via <see cref="AccessCodePromptDialog"/>, which verifies
+    /// the code against the panel before closing. Returns null if the operator cancels, in
+    /// which case the caller should abort the operation.
+    /// </summary>
+    private async Task<string?> ResolveMasterCodeAsync()
+    {
+        // Reuse cached value from a previous verified prompt this page visit.
+        if (!string.IsNullOrWhiteSpace(_masterCode))
+            return _masterCode;
+
+        // Try connection settings first.
+        var configured = ConnectionSettings.CurrentValue.Connections
+            .FirstOrDefault(c => string.Equals(c.SessionId, _sessionId, StringComparison.OrdinalIgnoreCase))
+            ?.MasterCode;
+
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            _masterCode = configured;
+            return _masterCode;
+        }
+
+        // Prompt the operator. The dialog verifies against the panel before closing.
+        var parameters = new DialogParameters<AccessCodePromptDialog>
+        {
+            { x => x.Label, "Master Code" },
+            { x => x.HelperText, "Enter the panel's master code (4, 6, or 8 digits) to manage user access codes" },
+            { x => x.MaxLength, 8 },
+            { x => x.InputMode, InputMode.numeric },
+            { x => x.Validator, code => IsValidCodeFormat(code) ? null : "Master code must be 4, 6, or 8 digits" },
+            { x => x.VerifyAsync, (code, ct) => UserService.VerifyMasterCodeAsync(_sessionId!, code, ct) },
+            { x => x.VerificationFailedMessage, "Incorrect master code. Please try again." }
+        };
+
+        var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.ExtraSmall, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<AccessCodePromptDialog>("Enter Master Code", parameters, options);
+        var result = await dialog.Result;
+
+        if (result?.Canceled != false)
+        {
+            Navigation.NavigateTo("/");
+            return null;
+        }
+
+        _masterCode = result.Data as string;
+        return _masterCode;
+    }
+
+    private static bool IsValidCodeFormat(string? code)
+    {
+        if (string.IsNullOrEmpty(code)) return false;
+        if (code.Length != 4 && code.Length != 6 && code.Length != 8) return false;
+        foreach (var ch in code)
+            if (ch < '0' || ch > '9') return false;
+        return true;
+    }
+
     private async Task EditUserAsync(PanelUserState user)
     {
         if (_sessionId is null) return;
+
+        var masterCode = await ResolveMasterCodeAsync();
+        if (masterCode is null) return;
 
         var statusText = user.IsDisabled
             ? " — Disabled"
@@ -262,7 +331,8 @@
         {
             { x => x.User, user },
             { x => x.SessionId, _sessionId },
-            { x => x.MaxPartitions, _session?.MaxPartitions ?? 2 }
+            { x => x.MaxPartitions, _session?.MaxPartitions ?? 2 },
+            { x => x.MasterCode, masterCode }
         };
         var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true };
         var dialog = await DialogService.ShowAsync<UserEditDialog>($"User {user.UserIndex}{statusText}", parameters, options);

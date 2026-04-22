@@ -29,6 +29,13 @@ public interface IPanelConfigurationService
     Task<SectionResult> ReadAllAsync(string sessionId, string installerCode, CancellationToken ct);
 
     /// <summary>
+    /// Quickly tests whether the panel accepts <paramref name="installerCode"/> by entering
+    /// and immediately exiting installer programming mode. Returns true on success.
+    /// Used by the operator prompt dialog to validate the code before any real read/write.
+    /// </summary>
+    Task<bool> VerifyInstallerCodeAsync(string sessionId, string installerCode, CancellationToken ct);
+
+    /// <summary>
     /// Reads all configuration sections using the provided send delegate.
     /// Does NOT manage config mode entry/exit or acquire the config lock —
     /// the caller is responsible for both.

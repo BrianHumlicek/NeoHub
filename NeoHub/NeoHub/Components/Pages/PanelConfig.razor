@@ -388,8 +388,18 @@
 
     private async Task<string?> PromptForInstallerCodeAsync()
     {
+        if (_sessionId is null) return null;
+
+        var parameters = new DialogParameters<AccessCodePromptDialog>
+        {
+            { x => x.Label, "Installer Code" },
+            { x => x.HelperText, "Enter the panel's installer code to access programming mode" },
+            { x => x.VerifyAsync, (code, ct) => ConfigService.VerifyInstallerCodeAsync(_sessionId, code, ct) },
+            { x => x.VerificationFailedMessage, "Incorrect installer code. Please try again." }
+        };
+
         var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.ExtraSmall, FullWidth = true };
-        var dialog = await DialogService.ShowAsync<InstallerCodeDialog>("Enter Installer Code", new DialogParameters<InstallerCodeDialog>(), options);
+        var dialog = await DialogService.ShowAsync<AccessCodePromptDialog>("Enter Installer Code", parameters, options);
         var result = await dialog.Result;
         return result?.Canceled == false ? result.Data as string : null;
     }
