@@ -248,7 +248,16 @@
         try
         {
             var result = await UserService.DisableUserAsync(SessionId, User.UserIndex, MasterCode, _cts.Token);
-            HandleCrossingResult(result, disableRequested: true);
+            if (result.Success)
+            {
+                Snackbar.Add(
+                    $"User {User.UserIndex} disabled. Panel-side attributes and partitions were cleared.",
+                    Severity.Info);
+                MudDialog.Close(DialogResult.Ok(true));
+                return;
+            }
+
+            Snackbar.Add($"Failed: {result.ErrorMessage}", Severity.Error);
         }
         catch (OperationCanceledException) { /* dialog closed */ }
         catch (Exception ex)
@@ -277,7 +286,7 @@
             if (_disabled)
             {
                 var result = await UserService.EnableUserAsync(SessionId, User.UserIndex, _newCode, MasterCode, _cts.Token);
-                HandleCrossingResult(result, disableRequested: false);
+                HandleCrossingResult(result);
                 return;
             }
 
@@ -331,7 +340,7 @@
         }
     }
 
-    private void HandleCrossingResult(PanelUserWriteResult result, bool disableRequested)
+    private void HandleCrossingResult(PanelUserWriteResult result)
     {
         if (!result.Success || result.UpdatedUser is null)
         {
@@ -339,18 +348,10 @@
             return;
         }
 
+        // Enable succeeded — refresh in-dialog state so the UI expands into the full editor
+        // (attributes, partitions, label). The user stays in the dialog to finish configuring.
         User = result.UpdatedUser;
         SyncFromUser();
-
-        // Only toast on disable — the dialog visibly collapses, but it's worth surfacing the
-        // panel-side attribute/partition clear. On enable, the dialog visibly expands into the
-        // full editor, which is enough signal on its own.
-        if (disableRequested)
-        {
-            Snackbar.Add(
-                $"User {User.UserIndex} disabled. Panel-side attributes and partitions were cleared.",
-                Severity.Info);
-        }
     }
 
     private List<byte> BuildPartitionList(bool[]? assignments = null)
