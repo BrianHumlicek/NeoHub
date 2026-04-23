@@ -37,24 +37,16 @@ namespace NeoHub.Services
         public PanelUserService(
             IMediator mediator,
             IPanelStateService panelState,
+            IPanelAccessCodeService accessCodes,
             ILogger<PanelUserService> logger)
         {
             _mediator = mediator;
             _panelState = panelState;
+            _accessCodes = accessCodes;
             _logger = logger;
         }
 
-        public async Task<bool> VerifyMasterCodeAsync(string sessionId, string masterCode, CancellationToken ct)
-        {
-            if (string.IsNullOrWhiteSpace(masterCode)) return false;
-            if (_panelState.GetSession(sessionId) is null) return false;
-
-            if (!await EnterProgrammingModeAsync(sessionId, ProgrammingMode.AccessCodeProgramming, masterCode, readWrite: false, ct))
-                return false;
-
-            await ExitConfigModeAsync(sessionId, ct);
-            return true;
-        }
+        private readonly IPanelAccessCodeService _accessCodes;
 
         public async Task<PanelUserReadResult> ReadAllAsync(string sessionId, string masterCode, CancellationToken ct)
         {
@@ -70,43 +62,46 @@ namespace NeoHub.Services
 
             _logger.LogInformation("Reading panel users for session {SessionId}, max users: {MaxUsers}", sessionId, session.MaxUsers);
 
-            session.IsReadingUsers = true;
-            session.UserReadCurrent = 0;
-            session.UserReadTotal = session.MaxUsers;
-            session.UserReadProgress = null;
-            _panelState.UpdateSession(sessionId, _ => { });
+            _panelState.UpdateSession(sessionId, s =>
+            {
+                s.IsReadingUsers = true;
+                s.UserReadCurrent = 0;
+                s.UserReadTotal = s.MaxUsers;
+                s.UserReadProgress = null;
+            });
 
             try
             {
                 // 1. Read user labels first (no programming mode needed, uses CommandRequestMessage)
-                UpdateProgress(session, sessionId, "Reading user labels…");
+                UpdateProgress(sessionId, "Reading user labels…");
                 var labels = await ReadUserLabelsAsync(sessionId, session.MaxUsers, ct);
 
-                // 2. Enter programming mode for access code commands
-                UpdateProgress(session, sessionId, "Entering programming mode…");
-                if (!await EnterProgrammingModeAsync(sessionId, ProgrammingMode.AccessCodeProgramming, masterCode, readWrite: false, ct))
-                    return new PanelUserReadResult(false, "Failed to enter programming mode — verify the master code is correct");
+                // 2. Enter programming mode via the access code service (owns the shared lock +
+                //    LeadIn wait + exit on all exit paths). The delegate runs with the panel
+                //    already in AccessCodeProgramming mode.
+                UpdateProgress(sessionId, "Entering programming mode…");
+                var scoped = await _accessCodes.ExecuteAsync(
+                    sessionId, PanelAccessCodeKind.Master, masterCode, readWrite: false,
+                    operation: innerCt => ReadAllUsersAsync(sessionId, session, labels, innerCt),
+                    ct);
 
-                PanelUserReadResult result;
-                try
+                if (!scoped.Success)
                 {
-                    // 3. Batch-read all user data types in parallel
-                    result = await ReadAllUsersAsync(sessionId, session, labels, ct);
-                }
-                finally
-                {
-                    await ExitConfigModeAsync(sessionId, ct);
+                    return new PanelUserReadResult(false,
+                        scoped.ErrorMessage ?? "Failed to enter programming mode — verify the master code is correct");
                 }
 
-                return result;
+                return scoped.Result ?? new PanelUserReadResult(false, "Read returned no result");
             }
             finally
             {
-                session.IsReadingUsers = false;
-                session.UserReadProgress = null;
-                session.UserReadCurrent = 0;
-                session.UserReadTotal = 0;
-                _panelState.UpdateSession(sessionId, _ => { });
+                _panelState.UpdateSession(sessionId, s =>
+                {
+                    s.IsReadingUsers = false;
+                    s.UserReadProgress = null;
+                    s.UserReadCurrent = 0;
+                    s.UserReadTotal = 0;
+                });
             }
         }
 
@@ -147,104 +142,105 @@ namespace NeoHub.Services
             if (string.IsNullOrWhiteSpace(masterCode))
                 return new PanelUserWriteResult(false, "Master code is required");
 
-            if (!await EnterProgrammingModeAsync(sessionId, ProgrammingMode.AccessCodeProgramming, masterCode, readWrite: true, ct))
-                return new PanelUserWriteResult(false, "Failed to enter programming mode");
-
-            try
-            {
-                var errors = new List<string>();
-                int idx = user.UserIndex;
-
-                if (codeDirty)
+            // All the panel commands below run inside the access code service's scope:
+            // shared lock acquired, panel in AccessCodeProgramming mode, automatic exit on all paths.
+            var scoped = await _accessCodes.ExecuteAsync(
+                sessionId, PanelAccessCodeKind.Master, masterCode, readWrite: true,
+                operation: async innerCt =>
                 {
-                    if (!await SendCommandAsync(sessionId, new AccessCodeWrite
-                    {
-                        AccessCodeStart = idx,
-                        AccessCodeCount = 1,
-                        AccessCodes = [user.CodeValue ?? ""]
-                    }, ct))
-                        errors.Add("Access code");
-                }
+                    var errors = new List<string>();
+                    int idx = user.UserIndex;
 
-                if (writeAttrs)
-                {
-                    if (!await SendCommandAsync(sessionId, new AccessCodeAttributeWrite
+                    if (codeDirty)
                     {
-                        AccessCodeStart = idx,
-                        AccessCodeCount = 1,
-                        DataWidth = 1,
-                        Attributes = [user.Attributes]
-                    }, ct))
-                        errors.Add("Attributes");
-                }
-
-                if (writeParts)
-                {
-                    int maxPartitions = _panelState.GetSession(sessionId)?.MaxPartitions ?? 8;
-                    int dataWidth = Math.Max(1, (maxPartitions + 7) / 8);
-                    var bitmask = new byte[dataWidth];
-                    foreach (var p in user.Partitions)
-                    {
-                        if (p < 1 || p > maxPartitions)
+                        if (!await SendCommandAsync(sessionId, new AccessCodeWrite
                         {
-                            _logger.LogWarning("User {Index}: partition {Partition} out of range 1..{Max}, ignoring",
-                                idx, p, maxPartitions);
-                            continue;
-                        }
-                        int byteIndex = (p - 1) / 8;
-                        int bitIndex = (p - 1) % 8;
-                        bitmask[byteIndex] |= (byte)(1 << bitIndex);
+                            AccessCodeStart = idx,
+                            AccessCodeCount = 1,
+                            AccessCodes = [user.CodeValue ?? ""]
+                        }, innerCt))
+                            errors.Add("Access code");
                     }
 
-                    if (!await SendCommandAsync(sessionId, new AccessCodePartitionAssignmentWrite
+                    if (writeAttrs)
                     {
-                        AccessCodeStart = idx,
-                        AccessCodeCount = 1,
-                        DataWidth = (byte)dataWidth,
-                        PartitionBitmask = bitmask
-                    }, ct))
-                        errors.Add("Partition assignments");
-                }
+                        if (!await SendCommandAsync(sessionId, new AccessCodeAttributeWrite
+                        {
+                            AccessCodeStart = idx,
+                            AccessCodeCount = 1,
+                            DataWidth = 1,
+                            Attributes = [user.Attributes]
+                        }, innerCt))
+                            errors.Add("Attributes");
+                    }
 
-                if (writeLabel)
-                {
-                    if (!await SendCommandAsync(sessionId, new AccessCodeLabelWrite
+                    if (writeParts)
                     {
-                        AccessCodeStart = idx,
-                        AccessCodeCount = 1,
-                        AccessCodeLabels = [user.UserLabel ?? ""]
-                    }, ct))
-                        errors.Add("Label");
-                }
+                        int maxPartitions = _panelState.GetSession(sessionId)?.MaxPartitions ?? 8;
+                        int dataWidth = Math.Max(1, (maxPartitions + 7) / 8);
+                        var bitmask = new byte[dataWidth];
+                        foreach (var p in user.Partitions)
+                        {
+                            if (p < 1 || p > maxPartitions)
+                            {
+                                _logger.LogWarning("User {Index}: partition {Partition} out of range 1..{Max}, ignoring",
+                                    idx, p, maxPartitions);
+                                continue;
+                            }
+                            int byteIndex = (p - 1) / 8;
+                            int bitIndex = (p - 1) % 8;
+                            bitmask[byteIndex] |= (byte)(1 << bitIndex);
+                        }
 
-                if (errors.Count > 0)
-                    return new PanelUserWriteResult(false, $"Failed to write: {string.Join(", ", errors)}");
+                        if (!await SendCommandAsync(sessionId, new AccessCodePartitionAssignmentWrite
+                        {
+                            AccessCodeStart = idx,
+                            AccessCodeCount = 1,
+                            DataWidth = (byte)dataWidth,
+                            PartitionBitmask = bitmask
+                        }, innerCt))
+                            errors.Add("Partition assignments");
+                    }
 
-                // On a crossing, re-read the authoritative panel state so our local copy
-                // reflects whatever the panel actually did (attrs/partitions reset, etc.).
-                if (crossed)
-                {
-                    await RefreshSingleUserAsync(sessionId, user, ct);
-                }
+                    if (writeLabel)
+                    {
+                        if (!await SendCommandAsync(sessionId, new AccessCodeLabelWrite
+                        {
+                            AccessCodeStart = idx,
+                            AccessCodeCount = 1,
+                            AccessCodeLabels = [user.UserLabel ?? ""]
+                        }, innerCt))
+                            errors.Add("Label");
+                    }
 
-                var session = _panelState.GetSession(sessionId);
-                if (session != null)
-                {
-                    user.LastUpdated = DateTime.UtcNow;
-                    session.Users[idx] = user;
-                    _panelState.UpdateSession(sessionId, _ => { });
-                }
+                    if (errors.Count > 0)
+                        return new PanelUserWriteResult(false, $"Failed to write: {string.Join(", ", errors)}");
 
-                return new PanelUserWriteResult(true)
-                {
-                    Crossed = crossed,
-                    UpdatedUser = user,
-                };
-            }
-            finally
-            {
-                await ExitConfigModeAsync(sessionId, ct);
-            }
+                    // On a crossing, re-read the authoritative panel state so our local copy
+                    // reflects whatever the panel actually did (attrs/partitions reset, etc.).
+                    if (crossed)
+                        await RefreshSingleUserAsync(sessionId, user, innerCt);
+
+                    var session = _panelState.GetSession(sessionId);
+                    if (session != null)
+                    {
+                        user.LastUpdated = DateTime.UtcNow;
+                        session.Users[idx] = user;
+                        _panelState.UpdateSession(sessionId, _ => { });
+                    }
+
+                    return new PanelUserWriteResult(true)
+                    {
+                        Crossed = crossed,
+                        UpdatedUser = user,
+                    };
+                },
+                ct);
+
+            if (!scoped.Success)
+                return new PanelUserWriteResult(false, scoped.ErrorMessage ?? "Failed to write user");
+
+            return scoped.Result ?? new PanelUserWriteResult(false, "Write returned no result");
         }
 
         public Task<PanelUserWriteResult> DisableUserAsync(string sessionId, int userIndex, string masterCode, CancellationToken ct)
@@ -350,10 +346,9 @@ namespace NeoHub.Services
 
         // ── Progress reporting ────────────────────────────────────────────
 
-        private void UpdateProgress(Models.SessionState session, string sessionId, string message)
+        private void UpdateProgress(string sessionId, string message)
         {
-            session.UserReadProgress = message;
-            _panelState.UpdateSession(sessionId, _ => { });
+            _panelState.UpdateSession(sessionId, s => s.UserReadProgress = message);
         }
 
         // ── User labels (via NotificationLabelText) ─────────────────────
@@ -431,7 +426,7 @@ namespace NeoHub.Services
             int partitionWidth = Math.Max(1, (session.MaxPartitions + 7) / 8);
             var sw = Stopwatch.StartNew();
 
-            UpdateProgress(session, sessionId, "Reading access codes…");
+            UpdateProgress(sessionId, "Reading access codes…");
             // Conservative: 8-digit codes = 4 BCD bytes
             var codes = await ReadBatchedAsync<AccessCodeReadResponse, string>(
                 sessionId, maxUsers,
@@ -440,7 +435,7 @@ namespace NeoHub.Services
                 r => r.AccessCodes,
                 ct);
 
-            UpdateProgress(session, sessionId, "Reading attributes…");
+            UpdateProgress(sessionId, "Reading attributes…");
             var attrs = await ReadBatchedAsync<AccessCodeAttributeReadResponse, PanelUserAttributes>(
                 sessionId, maxUsers,
                 MaxRecordsPerBatch(bytesPerRecord: 1),
@@ -448,7 +443,7 @@ namespace NeoHub.Services
                 r => r.Attributes,
                 ct);
 
-            UpdateProgress(session, sessionId, "Reading partition assignments…");
+            UpdateProgress(sessionId, "Reading partition assignments…");
             var parts = await ReadBatchedAsync<AccessCodePartitionAssignmentReadResponse, List<byte>>(
                 sessionId, maxUsers,
                 MaxRecordsPerBatch(bytesPerRecord: partitionWidth),
@@ -456,7 +451,7 @@ namespace NeoHub.Services
                 r => r.PartitionAssignments,
                 ct);
 
-            UpdateProgress(session, sessionId, "Reading code configuration…");
+            UpdateProgress(sessionId, "Reading code configuration…");
             var confs = await ReadBatchedAsync<UserCodeConfigurationReadResponse, UserCodeConfigurationReadResponse.UserCodeType>(
                 sessionId, maxUsers,
                 MaxRecordsPerBatch(bytesPerRecord: 1),
@@ -554,11 +549,9 @@ namespace NeoHub.Services
         // ── Programming mode management ──────────────────────────────────
 
         /// <summary>
-        /// Enters a programming mode with the given code,
-        /// then waits for the panel to confirm via LeadIn notification.
+        /// Generic send helper for commands that return a bool success (no response body needed).
         /// </summary>
-        private async Task<bool> EnterProgrammingModeAsync(
-            string sessionId, ProgrammingMode mode, string accessCode, bool readWrite, CancellationToken ct)
+        private async Task<bool> SendCommandAsync(string sessionId, IMessageData command, CancellationToken ct)
         {
             var session = _panelState.GetSession(sessionId);
             if (session == null)
