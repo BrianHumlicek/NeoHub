@@ -6,14 +6,15 @@
 @using DSC.TLink.ITv2.Enumerations
 @using Microsoft.Extensions.Options
 @inject IPanelUserService UserService
+@inject IPanelUserListFileService UserListFiles
 @inject IPanelStateService PanelState
 @inject IITv2SessionManager SessionManager
 @inject ISessionMonitor SessionMonitor
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject NavigationManager Navigation
-@inject IOptionsMonitor<PanelConnectionsSettings> ConnectionSettings
-@inject IPanelAccessCodeService AccessCodeService
+@inject IPanelAccessCodeService AccessCodes
+@inject IJSRuntime JS
 @implements IDisposable
 
 <PageTitle>Panel Users</PageTitle>
@@ -35,9 +36,9 @@
                         <MudText Typo="Typo.h5">Panel Users</MudText>
                         <MudText Typo="Typo.caption" Color="Color.Secondary">
                             Session: @_sessionId
-                            @if (_session?.UsersLastReadAt is not null)
+                            @if (_session?.UserList.LastReadAt is not null)
                             {
-                                <text> · Read @_session.UsersLastReadAt.Value.ToLocalTime().ToString("HH:mm:ss")</text>
+                                <text> · Read @_session.UserList.LastReadAt.Value.ToLocalTime().ToString("HH:mm:ss")</text>
                             }
                             @if (_session?.MaxUsers > 0)
                             {
@@ -50,24 +51,86 @@
                         </MudText>
                     </div>
                 </MudStack>
-                <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
-                    <MudSwitch T="bool" Label="Show codes" @bind-Value="_revealCodes" Color="Color.Primary" />
-                    <MudSwitch T="bool" Label="Show inactive" @bind-Value="_showInactive" Color="Color.Primary" />
-                    <MudButton Variant="@(IsReading ? Variant.Filled : Variant.Outlined)"
-                               Color="@(IsReading ? Color.Info : Color.Default)"
-                               OnClick="ReadUsersAsync"
-                               Disabled="@IsReading"
-                               Style="position: relative; overflow: hidden;">
-                        @if (IsReading)
+                <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap">
+                    <MudTooltip Text="@ReadButtonTooltip" Placement="Placement.Left" Arrow="true">
+                        <MudButton Variant="@(IsReading ? Variant.Filled : Variant.Outlined)"
+                                   Color="@(IsReading ? Color.Info : Color.Default)"
+                                   OnClick="ReadUsersAsync"
+                                   Disabled="@(!CanReadUsers)"
+                                   Style="position: relative; overflow: hidden;">
+                            @if (IsReading)
+                            {
+                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                                <span>@(_session?.UserList.ReadProgress ?? "Reading…")</span>
+                            }
+                            else if (!IsPanelReady)
+                            {
+                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                                <span>Waiting for panel…</span>
+                            }
+                            else if (HasUsers)
+                            {
+                                <MudIcon Icon="@Icons.Material.Filled.Refresh" Class="mr-1" />
+                                <span>Refresh</span>
+                            }
+                            else
+                            {
+                                <MudIcon Icon="@Icons.Material.Filled.Download" Class="mr-1" />
+                                <span>Read Users</span>
+                            }
+                        </MudButton>
+                    </MudTooltip>
+                    <MudMenu Label="Save" StartIcon="@Icons.Material.Filled.Save"
+                             Variant="Variant.Outlined" AnchorOrigin="Origin.BottomRight"
+                             Disabled="@(!HasUsers)">
+                        <MudMenuItem Icon="@Icons.Material.Filled.Computer"
+                                     OnClick="SaveToServerAsync">
+                            Save to Server
+                        </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.FileDownload"
+                                     OnClick="DownloadToBrowserAsync">
+                            Export File
+                        </MudMenuItem>
+                    </MudMenu>
+                    <MudMenu Label="Load" StartIcon="@Icons.Material.Filled.FolderOpen"
+                             Variant="Variant.Outlined" AnchorOrigin="Origin.BottomRight">
+                        @{
+                            var savedFiles = UserListFiles.GetSavedFiles();
+                        }
+                        @if (savedFiles.Any())
                         {
-                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
-                            <span>@(_session?.UserReadProgress ?? "Reading…")</span>
+                            @foreach (var file in savedFiles)
+                            {
+                                var f = file;
+                                <MudMenuItem Icon="@Icons.Material.Filled.Description"
+                                             OnClick="@(() => LoadFromServerAsync(f))">
+                                    @f
+                                </MudMenuItem>
+                            }
+                            <MudDivider />
                         }
                         else
                         {
-                            <MudIcon Icon="@Icons.Material.Filled.Download" Class="mr-1" />
-                            <span>Read Users</span>
+                            <MudMenuItem Disabled="true">
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">No saved files</MudText>
+                            </MudMenuItem>
+                            <MudDivider />
                         }
+                        <MudMenuItem Icon="@Icons.Material.Filled.FileUpload">
+                            <MudFileUpload T="IBrowserFile" Accept=".json"
+                                           FilesChanged="UploadFromBrowserAsync">
+                                <ActivatorContent>
+                                    <MudText>Upload from Browser</MudText>
+                                </ActivatorContent>
+                            </MudFileUpload>
+                        </MudMenuItem>
+                    </MudMenu>
+                    <MudButton Variant="Variant.Outlined"
+                               StartIcon="@Icons.Material.Filled.Print"
+                               OnClick="PrintAsync"
+                               Disabled="@(!HasUsers)"
+                               Class="px-4">
+                        Print
                     </MudButton>
                 </MudStack>
             </MudStack>
@@ -77,7 +140,7 @@
                 <MudAlert Severity="@(_lastResult.Success ? Severity.Success : Severity.Error)" Dense="true" Class="mt-3">
                     @if (_lastResult.Success)
                     {
-                        <span>Read completed: @_lastResult.ReadCount OK, @_lastResult.FailedCount failed.</span>
+                        <span>Read complete.</span>
                     }
                     else
                     {
@@ -86,16 +149,16 @@
                 </MudAlert>
             }
 
-            @if (IsReading && _session?.UserReadTotal > 0)
+            @if (IsReading && _session?.UserList.ReadTotal > 0)
             {
-                var pct = _session.UserReadTotal > 0
-                    ? (double)_session.UserReadCurrent / _session.UserReadTotal * 100
+                var pct = _session.UserList.ReadTotal > 0
+                    ? (double)_session.UserList.ReadCurrent / _session.UserList.ReadTotal * 100
                     : 0;
                 <MudProgressLinear Value="@pct" Color="Color.Primary" Rounded="true" Size="Size.Small" Class="mt-2" />
             }
         </MudPaper>
 
-        @if (_session?.Users.Any() == true)
+        @if (_session?.UserList.Users.Any() == true)
         {
             <div style="overflow-x: auto;">
                 <MudSimpleTable Dense="true" Hover="true" FixedHeader="true" Style="max-height: 70vh;">
@@ -114,49 +177,60 @@
                         @{
                             int maxPartitions = _session?.MaxPartitions ?? 2;
                         }
-                        @foreach (var item in GetFilteredUsers())
+                        @foreach (var group in GetUserGroups())
                         {
-                            <tr style="@(item.IsActive ? "" : "opacity: 0.4;") cursor: pointer;" @onclick="() => EditUserAsync(item)">
-                                <td><strong>@item.UserIndex</strong></td>
-                                <td>@GetUserStatusChip(item)</td>
-                                <td>@(string.IsNullOrWhiteSpace(item.DisplayLabel) ? "—" : item.DisplayLabel)</td>
-                                <td style="font-family: 'Courier New', monospace; font-size: 0.85em;">@FormatCode(item)</td>
-                                <td>@GetCodeTypeText(item)</td>
-                                <td>
-                                    @{
-                                        var attrByte = (byte)item.Attributes;
-                                        var allZero = attrByte == 0;
-                                    }
-                                    @if (allZero)
-                                    {
-                                        <span style="font-family:monospace; font-size:0.8em; white-space:nowrap; opacity:0.3;">00</span>
-                                    }
-                                    else
-                                    {
-                                        <MudTooltip Placement="Placement.Left" Arrow="true">
-                                            <ChildContent>
-                                                <span style="font-family:monospace; font-size:0.8em; white-space:nowrap;">@($"{attrByte:X2}")</span>
-                                            </ChildContent>
-                                            <TooltipContent>
-                                                @RenderAttributeTooltip(item.Attributes)
-                                            </TooltipContent>
-                                        </MudTooltip>
-                                    }
-                                </td>
-                                <td>
-                                    <div style="display: flex; gap: 3px; align-items: center;">
-                                        @for (int p = 0; p < maxPartitions; p++)
-                                        {
-                                            var partNum = (byte)(p + 1);
-                                            var assigned = item.Partitions.Contains(partNum);
-                                            <div style="width:18px; height:18px; border-radius:50%; display:flex; align-items:center; justify-content:center;
-                                                        background:@(assigned ? "#4caf50" : "#9e9e9e"); opacity:@(assigned ? "1" : "0.15");
-                                                        font-size:10px; font-weight:bold; color:#fff; line-height:1;"
-                                                 title="@($"P{partNum}: {(assigned ? "Assigned" : "Not assigned")}")">@partNum</div>
-                                        }
-                                    </div>
+                            if (group.Users.Count == 0) continue;
+
+                            <tr class="user-group-header">
+                                <td colspan="7" style="background-color: var(--mud-palette-background-grey); font-weight: 600; padding: 6px 12px;">
+                                    <span>@group.Label</span>
+                                    <span style="margin-left: 8px; opacity: 0.6; font-weight: normal;">(@group.Users.Count)</span>
                                 </td>
                             </tr>
+                            foreach (var item in group.Users)
+                            {
+                                <tr style="@(item.IsActive ? "" : "opacity: 0.5;") cursor: pointer;" @onclick="() => EditUserAsync(item)">
+                                    <td><strong>@item.UserIndex</strong></td>
+                                    <td>@GetUserStatusChip(item)</td>
+                                    <td>@(string.IsNullOrWhiteSpace(item.DisplayLabel) ? "—" : item.DisplayLabel)</td>
+                                    <td style="font-family: 'Courier New', monospace; font-size: 0.85em;">@FormatCode(item)</td>
+                                    <td>@GetCodeTypeText(item)</td>
+                                    <td>
+                                        @{
+                                            var attrByte = (byte)item.Attributes;
+                                            var allZero = attrByte == 0;
+                                        }
+                                        @if (allZero)
+                                        {
+                                            <span style="font-family:monospace; font-size:0.8em; white-space:nowrap; opacity:0.3;">00</span>
+                                        }
+                                        else
+                                        {
+                                            <MudTooltip Placement="Placement.Left" Arrow="true">
+                                                <ChildContent>
+                                                    <span style="font-family:monospace; font-size:0.8em; white-space:nowrap;">@($"{attrByte:X2}")</span>
+                                                </ChildContent>
+                                                <TooltipContent>
+                                                    @RenderAttributeTooltip(item.Attributes)
+                                                </TooltipContent>
+                                            </MudTooltip>
+                                        }
+                                    </td>
+                                    <td>
+                                        <div style="display: flex; gap: 3px; align-items: center;">
+                                            @for (int p = 0; p < maxPartitions; p++)
+                                            {
+                                                var partNum = (byte)(p + 1);
+                                                var assigned = item.Partitions.Contains(partNum);
+                                                <div style="width:18px; height:18px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+                                                            background:@(assigned ? "#4caf50" : "#9e9e9e"); opacity:@(assigned ? "1" : "0.15");
+                                                            font-size:10px; font-weight:bold; color:#fff; line-height:1;"
+                                                     title="@($"P{partNum}: {(assigned ? "Assigned" : "Not assigned")}")">@partNum</div>
+                                            }
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
                         }
                     </tbody>
                 </MudSimpleTable>
@@ -164,7 +238,10 @@
         }
         else if (!IsReading)
         {
-            <MudAlert Severity="Severity.Info">No user data loaded yet.</MudAlert>
+            var placeholder = IsPanelReady
+                ? "No user data loaded. Click Read Users above to read users from the panel."
+                : "Waiting for the panel to finish initializing…";
+            <MudAlert Severity="Severity.Info">@placeholder</MudAlert>
         }
     }
 </MudContainer>
@@ -172,19 +249,45 @@
 @code {
     private string? _sessionId;
     private SessionState? _session;
-    private string? _masterCode;
     private bool _localReading;
-    private bool _revealCodes;
-    private bool _showInactive;
     private PanelUserReadResult? _lastResult;
     private bool _disposed;
     private bool _renderDirty;
     private Timer? _renderTimer;
 
     /// <summary>
+    /// True once an auto-read has been attempted in this page session. Prevents the auto-read
+    /// from re-firing after the operator cancels the master-code prompt — they can still
+    /// explicitly click Refresh if they change their mind.
+    /// </summary>
+    private bool _autoReadAttempted;
+
+    /// <summary>
     /// True if a read is in progress (local or background). Survives page refresh.
     /// </summary>
-    private bool IsReading => _localReading || (_session?.IsReadingUsers ?? false);
+    private bool IsReading => _localReading || (_session?.UserList.IsReading ?? false);
+
+    /// <summary>
+    /// True once the panel's initial configuration pull has completed, set by
+    /// <see cref="Handlers.PanelConfigurationHandler"/> in the finally block of its pull.
+    /// This is the authoritative "panel is ready for user-initiated operations" flag
+    /// (as documented on <see cref="SessionState.IsInitialized"/>).
+    /// </summary>
+    private bool IsPanelReady => _session?.IsInitialized == true;
+
+    /// <summary>Button is enabled only when the panel is ready AND no read is in flight.</summary>
+    private bool CanReadUsers => IsPanelReady && !IsReading;
+
+    /// <summary>True once the user list has at least one entry — gates Save/Print buttons.</summary>
+    private bool HasUsers => _session?.UserList.Users.Count > 0;
+
+    private string ReadButtonTooltip => IsReading
+        ? "A read is already in progress."
+        : !IsPanelReady
+            ? "Waiting for the panel to report its capabilities. This usually completes within a few seconds of connecting."
+            : HasUsers
+                ? "Re-read all user slots from the panel. Use this if the data was changed outside NeoHub."
+                : "Reads all user slots (codes, attributes, partitions, labels).";
 
     protected override void OnInitialized()
     {
@@ -200,9 +303,42 @@
                 _renderDirty = false;
                 _session = _sessionId is null ? null : PanelState.GetSession(_sessionId);
                 StateHasChanged();
+                _ = TryAutoReadAsync();
             }
             catch (ObjectDisposedException) { }
         }), null, 200, 200);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Auto-read on first arrival mirrors the Configuration page's feel: if the operator
+        // just opened this page and the panel's ready, pull users without making them click.
+        // After that, the Refresh button covers the rare case where data changed outside NeoHub.
+        if (firstRender)
+            await TryAutoReadAsync();
+    }
+
+    /// <summary>
+    /// Fires ReadUsersAsync if and only if:
+    /// <list type="bullet">
+    /// <item>we haven't already attempted an auto-read this page session,</item>
+    /// <item>a session is active and the panel is ready,</item>
+    /// <item>no read is currently in flight, and</item>
+    /// <item>we have no user data yet (LastReadAt is null).</item>
+    /// </list>
+    /// The flag is set BEFORE the call so a cancelled master-code prompt still counts as
+    /// attempted — the operator can explicitly click Refresh if they want to try again.
+    /// </summary>
+    private async Task TryAutoReadAsync()
+    {
+        if (_autoReadAttempted) return;
+        if (_sessionId is null) return;
+        if (!IsPanelReady) return;
+        if (IsReading) return;
+        if (_session?.UserList.LastReadAt is not null) return;
+
+        _autoReadAttempted = true;
+        await ReadUsersAsync();
     }
 
     private void OnSessionsChanged()
@@ -230,7 +366,7 @@
 
     private async Task ReadUsersAsync()
     {
-        if (_sessionId is null || IsReading)
+        if (_sessionId is null || !CanReadUsers)
             return;
 
         var masterCode = await ResolveMasterCodeAsync();
@@ -258,62 +394,15 @@
     }
 
     /// <summary>
-    /// Returns the master code for the current session. Uses the configured value if present;
-    /// otherwise prompts the operator via <see cref="AccessCodePromptDialog"/>, which verifies
-    /// the code against the panel before closing. Returns null if the operator cancels, in
-    /// which case the caller should abort the operation.
+    /// Returns a verified master code for the current session, using the access code service's
+    /// resolve flow: cache → connection settings → prompt via <see cref="AccessCodePromptDialog"/>.
+    /// Returns null if no value is available and the operator cancels the prompt. Callers should
+    /// abort their operation in that case; the page stays put so the operator can still browse.
     /// </summary>
-    private async Task<string?> ResolveMasterCodeAsync()
-    {
-        // Reuse cached value from a previous verified prompt this page visit.
-        if (!string.IsNullOrWhiteSpace(_masterCode))
-            return _masterCode;
-
-        // Try connection settings first.
-        var configured = ConnectionSettings.CurrentValue.Connections
-            .FirstOrDefault(c => string.Equals(c.SessionId, _sessionId, StringComparison.OrdinalIgnoreCase))
-            ?.MasterCode;
-
-        if (!string.IsNullOrWhiteSpace(configured))
-        {
-            _masterCode = configured;
-            return _masterCode;
-        }
-
-        // Prompt the operator. The dialog verifies against the panel before closing.
-        var parameters = new DialogParameters<AccessCodePromptDialog>
-        {
-            { x => x.Label, "Master Code" },
-            { x => x.HelperText, "Enter the panel's master code (4, 6, or 8 digits) to manage user access codes" },
-            { x => x.MaxLength, 8 },
-            { x => x.InputMode, InputMode.numeric },
-            { x => x.Validator, code => IsValidCodeFormat(code) ? null : "Master code must be 4, 6, or 8 digits" },
-            { x => x.VerifyAsync, (code, ct) => UserService.VerifyMasterCodeAsync(_sessionId!, code, ct) },
-            { x => x.VerificationFailedMessage, "Incorrect master code. Please try again." }
-        };
-
-        var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.ExtraSmall, FullWidth = true };
-        var dialog = await DialogService.ShowAsync<AccessCodePromptDialog>("Enter Master Code", parameters, options);
-        var result = await dialog.Result;
-
-        if (result?.Canceled != false)
-        {
-            Navigation.NavigateTo("/");
-            return null;
-        }
-
-        _masterCode = result.Data as string;
-        return _masterCode;
-    }
-
-    private static bool IsValidCodeFormat(string? code)
-    {
-        if (string.IsNullOrEmpty(code)) return false;
-        if (code.Length != 4 && code.Length != 6 && code.Length != 8) return false;
-        foreach (var ch in code)
-            if (ch < '0' || ch > '9') return false;
-        return true;
-    }
+    private Task<string?> ResolveMasterCodeAsync() =>
+        _sessionId is null
+            ? Task.FromResult<string?>(null)
+            : DialogService.ResolveAccessCodeAsync(AccessCodes, _sessionId, PanelAccessCodeKind.Master);
 
     private async Task EditUserAsync(PanelUserState user)
     {
@@ -322,58 +411,88 @@
         var masterCode = await ResolveMasterCodeAsync();
         if (masterCode is null) return;
 
-        // Capture pre-edit code so we can sync cached/persisted master code after save.
+        // Master and regular users get different dialogs:
+        //   • Master (user 1): panel-enforced constraints (attrs/parts not writable). A focused
+        //     code-only dialog avoids rendering dead UI.
+        //   • Regular user: the full editor.
+        if (user.IsMaster)
+            await EditMasterCodeAsync(user, masterCode);
+        else
+            await EditRegularUserAsync(user, masterCode);
+    }
+
+    private async Task EditMasterCodeAsync(PanelUserState user, string masterCode)
+    {
+        // Capture so we can detect an actual code change on return.
         var originalCode = user.CodeValue;
 
+        var parameters = new DialogParameters<MasterCodeEditDialog>
+        {
+            { x => x.User, user },
+            { x => x.SessionId, _sessionId! },
+            { x => x.MasterCode, masterCode }
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true, CloseButton = true };
+        var dialog = await DialogService.ShowAsync<MasterCodeEditDialog>("Edit Master Code", parameters, options);
+        var result = await dialog.Result;
+
+        if (result?.Canceled == false)
+        {
+            _session = PanelState.GetSession(_sessionId!);
+
+            // Pull the (authoritative) post-write code back and sync cache / connection settings.
+            var newCode = _session?.UserList.Users.TryGetValue(PanelUserState.MasterUserIndex, out var updated) == true
+                ? updated.CodeValue
+                : null;
+            if (newCode != originalCode)
+                await SyncMasterCodeAsync(newCode);
+
+            StateHasChanged();
+        }
+    }
+
+    private async Task EditRegularUserAsync(PanelUserState user, string masterCode)
+    {
         var statusText = user.IsDisabled
             ? " — Disabled"
             : user.IsActive
-                ? (user.UserIndex == 1 ? " — Master" : " — Active")
+                ? " — Active"
                 : " — Empty";
 
         var parameters = new DialogParameters<UserEditDialog>
         {
             { x => x.User, user },
-            { x => x.SessionId, _sessionId },
+            { x => x.SessionId, _sessionId! },
             { x => x.MaxPartitions, _session?.MaxPartitions ?? 2 },
             { x => x.MasterCode, masterCode }
         };
         var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true };
         var dialog = await DialogService.ShowAsync<UserEditDialog>($"User {user.UserIndex}{statusText}", parameters, options);
         var result = await dialog.Result;
+
         if (result?.Canceled == false)
         {
-            _session = PanelState.GetSession(_sessionId);
-
-            // If the master user's code was just changed, keep our cache and connection settings
-            // in sync — otherwise subsequent user operations will fail using the old master code.
-            if (user.UserIndex == 1)
-            {
-                var newCode = _session?.Users.TryGetValue(1, out var updated) == true
-                    ? updated.CodeValue
-                    : null;
-                if (newCode != originalCode)
-                    await SyncMasterCodeAsync(newCode);
-            }
-
+            _session = PanelState.GetSession(_sessionId!);
             StateHasChanged();
         }
     }
 
     /// <summary>
-    /// Updates the cached master code and the persisted <see cref="ConnectionSettings"/> after a
-    /// successful write to user 1 on the panel. Called only when user 1's code actually changed.
+    /// Pushes the new master code into the access code service so both the in-memory cache and
+    /// the persisted <see cref="ConnectionSettings"/> stay in sync after user 1's code is changed.
+    /// Called only when user 1's code actually changed.
     /// </summary>
     private async Task SyncMasterCodeAsync(string? newCode)
     {
         if (_sessionId is null) return;
 
-        // Update in-memory cache so further operations in this session use the new code.
-        _masterCode = string.IsNullOrEmpty(newCode) ? null : newCode;
+        // SetCached keeps the in-memory cache coherent even when there's no matching connection
+        // settings entry to persist to (e.g., ad-hoc session).
+        AccessCodes.SetCached(_sessionId, PanelAccessCodeKind.Master, newCode);
 
         try
         {
-            var persisted = await AccessCodeService.UpdateConnectionCodeAsync(
+            var persisted = await AccessCodes.UpdateConnectionCodeAsync(
                 _sessionId, PanelAccessCodeKind.Master, newCode);
             if (persisted)
                 Snackbar.Add("Master code updated in connection settings", Severity.Info);
@@ -384,22 +503,149 @@
         }
     }
 
-    private IEnumerable<PanelUserState> GetFilteredUsers()
-    {
-        if (_session == null) return Enumerable.Empty<PanelUserState>();
+    /// <summary>Named group of users for the table's sectioned rendering.</summary>
+    private record UserGroup(string Label, IReadOnlyList<PanelUserState> Users);
 
-        var users = _session.Users.Values.OrderBy(x => x.UserIndex);
-        return _showInactive ? users : users.Where(x => x.IsActive);
+    /// <summary>
+    /// Users split into the two real panel states — Active and Disabled — sorted by user index
+    /// within each group. Every panel slot is one or the other; user reads are all-or-nothing
+    /// (see <see cref="PanelUserReadResult"/>) so a populated <c>UserList.Users</c> entry is
+    /// guaranteed to fall into one of these groups.
+    /// </summary>
+    private IReadOnlyList<UserGroup> GetUserGroups()
+    {
+        if (_session == null) return [];
+
+        var all = _session.UserList.Users.Values.OrderBy(u => u.UserIndex).ToList();
+
+        return new List<UserGroup>
+        {
+            new("Active",   all.Where(u => u.IsActive).ToList()),
+            new("Disabled", all.Where(u => u.IsDisabled).ToList()),
+        };
     }
 
-    private string FormatCode(PanelUserState user)
+    // ── Save / Load / Print ──────────────────────────────────────────────
+
+    /// <summary>
+    /// Writes the current user list to a timestamped file in the server's persist folder.
+    /// The file is JSON and <strong>contains plaintext access codes</strong> for lossless
+    /// round-trip. The folder is the same one used for panel config files.
+    /// </summary>
+    private async Task SaveToServerAsync()
     {
-        // Hide the disabled sentinel from the UI — users see the chip, not "AAAA".
+        if (_session is null || !HasUsers) return;
+
+        try
+        {
+            var fileName = $"panel-users-{_sessionId}-{DateTime.Now:yyyyMMdd-HHmmss}.json";
+            await UserListFiles.SaveToServerAsync(
+                _session.UserList, _session.MaxUsers, _session.MaxPartitions, fileName);
+            Snackbar.Add($"Saved to server: {fileName}", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Save failed: {ex.Message}", Severity.Error);
+        }
+    }
+
+    /// <summary>
+    /// Exports the user list as a JSON file to the operator's browser via the shared
+    /// <c>downloadFile</c> JS helper. Same format as <see cref="SaveToServerAsync"/>.
+    /// </summary>
+    private async Task DownloadToBrowserAsync()
+    {
+        if (_session is null || !HasUsers) return;
+
+        try
+        {
+            var bytes = UserListFiles.ExportToBytes(
+                _session.UserList, _session.MaxUsers, _session.MaxPartitions);
+            var base64 = Convert.ToBase64String(bytes);
+            var fileName = $"panel-users-{_sessionId}-{DateTime.Now:yyyyMMdd-HHmmss}.json";
+            await JS.InvokeVoidAsync("downloadFile", fileName, base64, "application/json");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Download failed: {ex.Message}", Severity.Error);
+        }
+    }
+
+    /// <summary>
+    /// Loads a user list file from the server and merges it into the current session's
+    /// <see cref="PanelUserListState"/>. Slots present in the file overwrite matching slots;
+    /// slots absent from the file are left untouched (merge semantics — see
+    /// <see cref="IPanelUserListFileService.ImportInto"/>).
+    /// </summary>
+    private async Task LoadFromServerAsync(string fileName)
+    {
+        if (_session is null) return;
+
+        try
+        {
+            var bytes = await UserListFiles.LoadBytesFromServerAsync(fileName);
+            var file = UserListFiles.ImportInto(bytes, _session.UserList);
+            PanelState.UpdateSession(_sessionId!, _ => { });  // notify subscribers of list change
+            Snackbar.Add($"Loaded {file.Users.Count} users from {fileName}", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Load failed: {ex.Message}", Severity.Error);
+        }
+    }
+
+    /// <summary>
+    /// Accepts a user list JSON file from the operator's browser and merges it in.
+    /// Same semantics as <see cref="LoadFromServerAsync"/>.
+    /// </summary>
+    private async Task UploadFromBrowserAsync(IBrowserFile? browserFile)
+    {
+        if (browserFile is null || _session is null) return;
+
+        try
+        {
+            // 1 MB cap — a user list JSON should be a few dozen KB at most; anything larger
+            // is either not our file or malicious.
+            using var ms = new MemoryStream();
+            await browserFile.OpenReadStream(maxAllowedSize: 1_048_576).CopyToAsync(ms);
+            var file = UserListFiles.ImportInto(ms.ToArray(), _session.UserList);
+            PanelState.UpdateSession(_sessionId!, _ => { });
+            Snackbar.Add($"Loaded {file.Users.Count} users from {browserFile.Name}", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Upload failed: {ex.Message}", Severity.Error);
+        }
+    }
+
+    /// <summary>
+    /// Opens a print-formatted HTML view of the user list in a new browser window and triggers
+    /// the print dialog. Codes are masked unless <c>Show codes</c> is on — matches what the
+    /// operator sees on the page.
+    /// </summary>
+    private async Task PrintAsync()
+    {
+        if (_session is null || !HasUsers) return;
+
+        try
+        {
+            var html = UserListFiles.GeneratePrintHtml(
+                _session.UserList, _session.MaxUsers, _session.MaxPartitions,
+                revealCodes: true, sessionId: _sessionId);
+            await JS.InvokeVoidAsync("printHtml", html);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Print failed: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private static string FormatCode(PanelUserState user)
+    {
+        // Hide the disabled sentinel and empty slots — the status chip already conveys the state.
         if (user.IsDisabled || string.IsNullOrEmpty(user.CodeValue))
             return "—";
-        if (_revealCodes)
-            return user.CodeValue;
-        return new string('*', Math.Max(4, user.CodeValue.Length));
+        return user.CodeValue;
     }
 
     private static string GetCodeTypeText(PanelUserState user)
@@ -452,7 +698,7 @@
             return;
         }
 
-        var isMaster = user.UserIndex == 1;
+        var isMaster = user.IsMaster;
         var color = isMaster ? Color.Warning : Color.Success;
         var label = isMaster ? "Master" : "Active";
 

@@ -13,7 +13,7 @@
 @inject ISessionMonitor SessionMonitor
 @inject IJSRuntime JS
 @inject IOptionsMonitor<PanelConnectionsSettings> ConnectionSettings
-@inject ISettingsPersistenceService PersistenceService
+@inject IPanelAccessCodeService AccessCodes
 @inject IDialogService DialogService
 @inject NavigationManager Navigation
 @inject ISnackbar Snackbar
@@ -294,9 +294,7 @@
             if (_config is not null)
             {
                 // Config loaded at startup — capture the installer code for writes
-                _installerCode = ConnectionSettings.CurrentValue.Connections
-                    .FirstOrDefault(c => string.Equals(c.SessionId, _sessionId, StringComparison.OrdinalIgnoreCase))
-                    ?.InstallerCode;
+                _installerCode = AccessCodes.GetConnectionCode(_sessionId, PanelAccessCodeKind.Installer);
                 StateHasChanged();
                 return;
             }
@@ -343,9 +341,7 @@
         if (_sessionId is null) return;
 
         var session = PanelState.GetSession(_sessionId);
-        var conn = ConnectionSettings.CurrentValue.Connections
-            .FirstOrDefault(c => string.Equals(c.SessionId, _sessionId, StringComparison.OrdinalIgnoreCase));
-        var code = conn?.InstallerCode;
+        var code = AccessCodes.GetConnectionCode(_sessionId, PanelAccessCodeKind.Installer);
 
         if (string.IsNullOrEmpty(code))
         {
@@ -391,18 +387,10 @@
     {
         if (_sessionId is null) return null;
 
-        var parameters = new DialogParameters<AccessCodePromptDialog>
-        {
-            { x => x.Label, "Installer Code" },
-            { x => x.HelperText, "Enter the panel's installer code to access programming mode" },
-            { x => x.VerifyAsync, (code, ct) => ConfigService.VerifyInstallerCodeAsync(_sessionId, code, ct) },
-            { x => x.VerificationFailedMessage, "Incorrect installer code. Please try again." }
-        };
-
-        var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.ExtraSmall, FullWidth = true };
-        var dialog = await DialogService.ShowAsync<AccessCodePromptDialog>("Enter Installer Code", parameters, options);
-        var result = await dialog.Result;
-        return result?.Canceled == false ? result.Data as string : null;
+        // Delegates to the shared access code service: cache → connection settings → prompt with
+        // panel-side verification. Same path the Users page uses for master codes.
+        return await DialogService.ResolveAccessCodeAsync(
+            AccessCodes, _sessionId, PanelAccessCodeKind.Installer);
     }
 
     private async Task EditZoneAsync(int zoneNumber)

@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using NeoHub.Services.PanelConfiguration;
 
 namespace NeoHub.Services.Models
@@ -16,28 +15,11 @@ namespace NeoHub.Services.Models
         public int MaxUsers { get; set; }
         public Dictionary<byte, PartitionState> Partitions { get; } = new();
         public Dictionary<byte, ZoneState> Zones { get; } = new();
-        public ConcurrentDictionary<int, PanelUserState> Users { get; } = new();
-        public DateTime? UsersLastReadAt { get; set; }
 
         /// <summary>
-        /// True while user reading is in progress. Survives page refresh.
+        /// User slots and user-read operation state. Parallels <see cref="Configuration"/>.
         /// </summary>
-        public bool IsReadingUsers { get; set; }
-
-        /// <summary>
-        /// Current reading phase description, e.g. "Reading user 12/48..."
-        /// </summary>
-        public string? UserReadProgress { get; set; }
-
-        /// <summary>
-        /// Number of users read so far.
-        /// </summary>
-        public int UserReadCurrent { get; set; }
-
-        /// <summary>
-        /// Total number of users to read.
-        /// </summary>
-        public int UserReadTotal { get; set; }
+        public PanelUserListState UserList { get; } = new();
 
         /// <summary>
         /// Installer configuration data read via SectionRead.

@@ -5,6 +5,7 @@ using DSC.TLink.ITv2.MediatR;
 using DSC.TLink.ITv2.Messages;
 using MediatR;
 using Microsoft.Extensions.Options;
+using NeoHub.Services.Models;
 using NeoHub.Services.Settings;
 
 namespace NeoHub.Services;
@@ -257,9 +258,7 @@ public class PanelAccessCodeService(
     // ── Internals ────────────────────────────────────────────────────────────
 
     private ConnectionSettings? FindConnection(string? sessionId) =>
-        string.IsNullOrEmpty(sessionId) ? null :
-        connectionSettings.CurrentValue.Connections
-            .FirstOrDefault(c => string.Equals(c.SessionId, sessionId, StringComparison.OrdinalIgnoreCase));
+        connectionSettings.CurrentValue.FindBySessionId(sessionId);
 
     private static ProgrammingMode MapProgrammingMode(PanelAccessCodeKind kind) => kind switch
     {

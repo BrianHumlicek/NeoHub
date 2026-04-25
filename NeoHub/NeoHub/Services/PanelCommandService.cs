@@ -25,8 +25,7 @@ namespace NeoHub.Services
         }
 
         private ConnectionSettings? GetConnection(string sessionId) =>
-            _connectionSettings.CurrentValue.Connections
-                .FirstOrDefault(c => string.Equals(c.SessionId, sessionId, StringComparison.OrdinalIgnoreCase));
+            _connectionSettings.CurrentValue.FindBySessionId(sessionId);
 
         public async Task<PanelCommandResult> ArmAsync(string sessionId, byte partition, ArmingMode mode, string? accessCode = null)
         {

@@ -1,0 +1,128 @@
+@* Focused editor for the master user (user 1). The panel doesn't allow writing attributes
+   or partition assignments to the master slot, so the full UserEditDialog's checkbox sections
+   would be dead UI here. This dialog shows only the access code field plus Save/Cancel.
+
+   Auth uses the CURRENT master code (resolved by the caller before opening); the new code is
+   written via IPanelUserService.WriteUserAsync. The parent page detects the code change and
+   routes through IPanelAccessCodeService to keep the in-memory cache and connection settings
+   coherent — same sync path as before, just reached from a cleaner dialog. *@
+@using NeoHub.Services
+@using NeoHub.Services.Models
+@implements IDisposable
+@inject IPanelUserService UserService
+@inject IPanelAccessCodeService AccessCodes
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="4">
+            <MudAlert Severity="Severity.Info" Dense="true" Icon="@Icons.Material.Filled.Shield">
+                The <strong>master code</strong> authorizes user management on this panel. NeoHub
+                will remember the new code for this session once it's saved.
+            </MudAlert>
+
+            <MudTextField T="string" @bind-Value="_code" Label="Master Code"
+                          Variant="Variant.Outlined"
+                          InputType="@(_revealCode ? InputType.Text : InputType.Password)"
+                          InputMode="InputMode.numeric"
+                          MaxLength="8"
+                          Validation="@((string? c) => AccessCodes.ValidateFormat(c))"
+                          HelperText="4, 6, or 8 digits"
+                          Immediate="true"
+                          AutoFocus="true"
+                          Adornment="Adornment.End"
+                          AdornmentIcon="@(_revealCode ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                          OnAdornmentClick="() => _revealCode = !_revealCode"
+                          Style="font-family: 'Courier New', monospace;" />
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync"
+                   Disabled="@(_busy || !CanSave)">
+            @if (_busy)
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+            }
+            Save
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter] public PanelUserState User { get; set; } = null!;
+    [Parameter] public string SessionId { get; set; } = null!;
+
+    /// <summary>Current master code (used to authenticate the write).</summary>
+    [Parameter] public string MasterCode { get; set; } = "";
+
+    private string _code = "";
+    private bool _revealCode;
+    private bool _busy;
+    private CancellationTokenSource? _cts;
+
+    private bool CanSave => AccessCodes.IsValidFormat(_code) && _code != (User.CodeValue ?? "");
+
+    protected override void OnParametersSet()
+    {
+        _code = User.CodeValue ?? "";
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_busy || !CanSave) return;
+
+        _busy = true;
+        StateHasChanged();
+
+        _cts ??= new CancellationTokenSource();
+        try
+        {
+            // Build an edited copy of the master slot with only the code changed. Attributes and
+            // partitions are copied verbatim — the panel ignores writes to them for user 1 anyway,
+            // and WriteUserAsync's dirty-check will skip those fields because they're unchanged.
+            var edited = new PanelUserState
+            {
+                UserIndex = User.UserIndex,
+                UserLabel = User.UserLabel,
+                CodeValue = _code,
+                CodeLength = _code.Length,
+                Attributes = User.Attributes,
+                Partitions = new List<byte>(User.Partitions),
+                HasProximityTag = User.HasProximityTag,
+            };
+
+            var result = await UserService.WriteUserAsync(SessionId, edited, User, MasterCode, _cts.Token);
+            if (result.Success)
+            {
+                Snackbar.Add("Master code updated", Severity.Success);
+                MudDialog.Close(DialogResult.Ok(true));
+            }
+            else
+            {
+                Snackbar.Add($"Save failed: {result.ErrorMessage}", Severity.Error);
+            }
+        }
+        catch (OperationCanceledException) { /* dialog closed */ }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+            StateHasChanged();
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    public void Dispose()
+    {
+        _cts?.Cancel();
+        _cts?.Dispose();
+    }
+}

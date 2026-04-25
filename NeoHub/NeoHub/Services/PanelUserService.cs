@@ -11,12 +11,8 @@ namespace NeoHub.Services
     {
         private readonly IMediator _mediator;
         private readonly IPanelStateService _panelState;
+        private readonly IPanelAccessCodeService _accessCodes;
         private readonly ILogger<PanelUserService> _logger;
-
-        /// <summary>
-        /// How long to wait for programming mode confirmation (LeadIn) after ConfigurationEnter.
-        /// </summary>
-        private static readonly TimeSpan ProgrammingModeTimeout = TimeSpan.FromSeconds(10);
 
         /// <summary>
         /// Conservative max ITv2 message payload in bytes.
@@ -46,8 +42,6 @@ namespace NeoHub.Services
             _logger = logger;
         }
 
-        private readonly IPanelAccessCodeService _accessCodes;
-
         public async Task<PanelUserReadResult> ReadAllAsync(string sessionId, string masterCode, CancellationToken ct)
         {
             var session = _panelState.GetSession(sessionId);
@@ -64,10 +58,10 @@ namespace NeoHub.Services
 
             _panelState.UpdateSession(sessionId, s =>
             {
-                s.IsReadingUsers = true;
-                s.UserReadCurrent = 0;
-                s.UserReadTotal = s.MaxUsers;
-                s.UserReadProgress = null;
+                s.UserList.IsReading = true;
+                s.UserList.ReadCurrent = 0;
+                s.UserList.ReadTotal = s.MaxUsers;
+                s.UserList.ReadProgress = null;
             });
 
             try
@@ -97,10 +91,10 @@ namespace NeoHub.Services
             {
                 _panelState.UpdateSession(sessionId, s =>
                 {
-                    s.IsReadingUsers = false;
-                    s.UserReadProgress = null;
-                    s.UserReadCurrent = 0;
-                    s.UserReadTotal = 0;
+                    s.UserList.IsReading = false;
+                    s.UserList.ReadProgress = null;
+                    s.UserList.ReadCurrent = 0;
+                    s.UserList.ReadTotal = 0;
                 });
             }
         }
@@ -124,7 +118,7 @@ namespace NeoHub.Services
             bool labelDirty = user.UserLabel != original.UserLabel;
 
             // The panel does not allow writing attributes or partitions for User 1 (master code).
-            if (user.UserIndex == 1)
+            if (user.IsMaster)
             {
                 attrsDirty = false;
                 partsDirty = false;
@@ -221,13 +215,8 @@ namespace NeoHub.Services
                     if (crossed)
                         await RefreshSingleUserAsync(sessionId, user, innerCt);
 
-                    var session = _panelState.GetSession(sessionId);
-                    if (session != null)
-                    {
-                        user.LastUpdated = DateTime.UtcNow;
-                        session.Users[idx] = user;
-                        _panelState.UpdateSession(sessionId, _ => { });
-                    }
+                    user.LastUpdated = DateTime.UtcNow;
+                    _panelState.UpdateSession(sessionId, s => s.UserList.Users[idx] = user);
 
                     return new PanelUserWriteResult(true)
                     {
@@ -246,7 +235,7 @@ namespace NeoHub.Services
         public Task<PanelUserWriteResult> DisableUserAsync(string sessionId, int userIndex, string masterCode, CancellationToken ct)
         {
             var session = _panelState.GetSession(sessionId);
-            if (session is null || !session.Users.TryGetValue(userIndex, out var existing))
+            if (session is null || !session.UserList.Users.TryGetValue(userIndex, out var existing))
                 return Task.FromResult(new PanelUserWriteResult(false, "User not found in session"));
 
             // Sentinel length must match the panel's configured code length so the panel round-trips it.
@@ -271,7 +260,7 @@ namespace NeoHub.Services
             }
 
             var session = _panelState.GetSession(sessionId);
-            if (session is null || !session.Users.TryGetValue(userIndex, out var existing))
+            if (session is null || !session.UserList.Users.TryGetValue(userIndex, out var existing))
                 return Task.FromResult(new PanelUserWriteResult(false, "User not found in session"));
 
             var edited = CloneForEdit(existing);
@@ -348,7 +337,7 @@ namespace NeoHub.Services
 
         private void UpdateProgress(string sessionId, string message)
         {
-            _panelState.UpdateSession(sessionId, s => s.UserReadProgress = message);
+            _panelState.UpdateSession(sessionId, s => s.UserList.ReadProgress = message);
         }
 
         // ── User labels (via NotificationLabelText) ─────────────────────
@@ -459,58 +448,55 @@ namespace NeoHub.Services
                 r => r.CodeType,
                 ct);
 
-            // Assemble PanelUserState from batch results
-            int readCount = 0, failedCount = 0;
-            for (int i = 1; i <= maxUsers; i++)
+            // All-or-nothing: if any of the four reads (codes / attrs / parts / configs) didn't
+            // return data for every slot, treat the whole read as failed and leave session state
+            // alone. A partial read is not a state we can safely edit from — writing back could
+            // clobber the slots whose attrs/partitions we never received.
+            if (codes.Count != maxUsers || attrs.Count != maxUsers
+                || parts.Count != maxUsers || confs.Count != maxUsers)
             {
-                var state = new Models.PanelUserState { UserIndex = i };
-
-                if (labels.TryGetValue(i, out var label))
-                    state.UserLabel = label;
-
-                if (codes.TryGetValue(i, out var code))
-                {
-                    state.CodeValue = code;
-                    state.CodeLength = code?.Length;
-                    readCount++;
-                }
-                else
-                {
-                    failedCount++;
-                }
-
-                if (attrs.TryGetValue(i, out var attr))
-                {
-                    state.Attributes = attr;
-                }
-
-                if (parts.TryGetValue(i, out var partList))
-                    state.Partitions = partList;
-
-                if (confs.TryGetValue(i, out var codeType))
-                    state.HasProximityTag = codeType == UserCodeConfigurationReadResponse.UserCodeType.ProximityTag;
-
-                state.LastUpdated = DateTime.UtcNow;
-                session.Users[i] = state;
+                _logger.LogWarning(
+                    "Incomplete user read: codes={Codes}/{Max}, attrs={Attrs}/{Max}, parts={Parts}/{Max}, confs={Confs}/{Max}",
+                    codes.Count, maxUsers, attrs.Count, maxUsers, parts.Count, maxUsers, confs.Count, maxUsers);
+                return new PanelUserReadResult(false,
+                    "Read incomplete — the panel didn't return data for every user slot. Check the connection and try again.");
             }
 
-            sw.Stop();
-            session.UserReadCurrent = maxUsers;
-            session.UserReadProgress = "Finishing…";
-            _panelState.UpdateSession(sessionId, _ => { });
-
-            _logger.LogInformation(
-                "Read {Total} users in {Elapsed}ms ({Ok} OK, {Failed} failed)",
-                maxUsers, sw.ElapsedMilliseconds, readCount, failedCount);
-
-            session.UsersLastReadAt = DateTime.UtcNow;
-            _panelState.UpdateSession(sessionId, _ => { });
-
-            return new PanelUserReadResult(true)
+            // Assemble PanelUserState from batch results.
+            var assembled = new Dictionary<int, Models.PanelUserState>(maxUsers);
+            for (int i = 1; i <= maxUsers; i++)
             {
-                ReadCount = readCount,
-                FailedCount = failedCount,
-            };
+                var state = new Models.PanelUserState
+                {
+                    UserIndex = i,
+                    UserLabel = labels.TryGetValue(i, out var label) ? label : null,
+                    CodeValue = codes[i],
+                    CodeLength = codes[i]?.Length,
+                    Attributes = attrs[i],
+                    Partitions = parts[i],
+                    HasProximityTag = confs[i] == UserCodeConfigurationReadResponse.UserCodeType.ProximityTag,
+                    LastUpdated = DateTime.UtcNow,
+                };
+                assembled[i] = state;
+            }
+
+            _panelState.UpdateSession(sessionId, s =>
+            {
+                foreach (var (idx, state) in assembled)
+                    s.UserList.Users[idx] = state;
+            });
+
+            sw.Stop();
+            _panelState.UpdateSession(sessionId, s =>
+            {
+                s.UserList.ReadCurrent = maxUsers;
+                s.UserList.ReadProgress = "Finishing…";
+                s.UserList.LastReadAt = DateTime.UtcNow;
+            });
+
+            _logger.LogInformation("Read {Total} users in {Elapsed}ms", maxUsers, sw.ElapsedMilliseconds);
+
+            return new PanelUserReadResult(true);
         }
 
         /// <summary>
@@ -544,88 +530,6 @@ namespace NeoHub.Services
             }
 
             return result;
-        }
-
-        // ── Programming mode management ──────────────────────────────────
-
-        /// <summary>
-        /// Generic send helper for commands that return a bool success (no response body needed).
-        /// </summary>
-        private async Task<bool> SendCommandAsync(string sessionId, IMessageData command, CancellationToken ct)
-        {
-            var session = _panelState.GetSession(sessionId);
-            if (session == null)
-                return false;
-
-            // If panel is already in programming mode, exit first to avoid "partition busy"
-            if (session.IsInProgrammingMode)
-            {
-                _logger.LogDebug("Panel already in programming mode, exiting first");
-                await ExitConfigModeAsync(sessionId, ct);
-                await Task.Delay(500, ct);
-            }
-
-            _logger.LogInformation("Entering {Mode} mode", mode);
-
-            var enterResponse = await _mediator.Send(new SessionCommand
-            {
-                SessionID = sessionId,
-                MessageData = new ConfigurationEnter
-                {
-                    Partition = 1,
-                    ProgrammingMode = mode,
-                    AccessCode = accessCode,
-                    ReadWrite = readWrite ? ConfigurationEnter.ReadWriteAccessEnum.ReadWriteMode : ConfigurationEnter.ReadWriteAccessEnum.ReadOnlyMode
-                }
-            }, ct);
-
-            if (!enterResponse.Success)
-            {
-                _logger.LogWarning("Failed to enter {Mode} mode: {Error}", mode, enterResponse.ErrorMessage);
-                return false;
-            }
-
-            _logger.LogDebug("ConfigurationEnter accepted, waiting for LeadIn...");
-
-            // Wait for the panel to confirm programming mode.
-            var deadline = DateTime.UtcNow + ProgrammingModeTimeout;
-            while (!session.IsInProgrammingMode && DateTime.UtcNow < deadline)
-            {
-                ct.ThrowIfCancellationRequested();
-                await Task.Delay(100, ct);
-            }
-
-            if (!session.IsInProgrammingMode)
-            {
-                _logger.LogWarning("Timed out waiting for LeadIn after {Timeout}s", ProgrammingModeTimeout.TotalSeconds);
-                // Try to exit cleanly even though we timed out
-                await ExitConfigModeAsync(sessionId, ct);
-                return false;
-            }
-
-            _logger.LogInformation("Panel confirmed {Mode} mode", mode);
-            return true;
-        }
-
-        /// <summary>
-        /// Exits configuration mode. Best-effort — logs but does not throw on failure.
-        /// </summary>
-        private async Task ExitConfigModeAsync(string sessionId, CancellationToken ct)
-        {
-            try
-            {
-                _logger.LogDebug("Sending ConfigurationExit");
-                await _mediator.Send(new SessionCommand
-                {
-                    SessionID = sessionId,
-                    MessageData = new ConfigurationExit { Partition = 1 }
-                }, ct);
-                _logger.LogDebug("Exited configuration mode");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to exit configuration mode");
-            }
         }
 
         private async Task<T?> SendRequestAsync<T>(string sessionId, IMessageData request, CancellationToken ct)

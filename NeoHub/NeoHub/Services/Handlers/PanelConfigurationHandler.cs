@@ -78,8 +78,7 @@ namespace NeoHub.Services.Handlers
                     s.MaxUsers = capabilities.MaxUsers;
                 });
 
-                var connectionSettings = _connectionSettings.CurrentValue.Connections
-                    .FirstOrDefault(c => string.Equals(c.SessionId, sessionId, StringComparison.OrdinalIgnoreCase));
+                var connectionSettings = _connectionSettings.CurrentValue.FindBySessionId(sessionId);
                 var maxZonesSetting = connectionSettings?.MaxZones ?? 0;
                 var effectiveZones = maxZonesSetting > 0
                     ? Math.Min(capabilities.MaxZones, maxZonesSetting)

@@ -31,8 +31,7 @@ public class ConnectionSettingsProvider : IConnectionSettingsProvider
     public ConnectionSettings? ResolveConnection(string sessionId, EncryptionType encryptionType)
     {
         var connections = _settings.CurrentValue.Connections;
-        var existing = connections.FirstOrDefault(c =>
-            string.Equals(c.SessionId, sessionId, StringComparison.OrdinalIgnoreCase));
+        var existing = _settings.CurrentValue.FindBySessionId(sessionId);
 
         if (existing == null)
         {
@@ -91,8 +90,7 @@ public class ConnectionSettingsProvider : IConnectionSettingsProvider
 
     public void ConfirmDefaults(string sessionId)
     {
-        var existing = _settings.CurrentValue.Connections.FirstOrDefault(c =>
-            string.Equals(c.SessionId, sessionId, StringComparison.OrdinalIgnoreCase));
+        var existing = _settings.CurrentValue.FindBySessionId(sessionId);
 
         if (existing == null || existing.IsComplete)
             return;

@@ -3,6 +3,7 @@
 @using DSC.TLink.ITv2.Enumerations
 @implements IDisposable
 @inject IPanelUserService UserService
+@inject IPanelAccessCodeService AccessCodes
 @inject ISnackbar Snackbar
 
 <MudDialog>
@@ -21,7 +22,7 @@
                               InputType="@(_revealCode ? InputType.Text : InputType.Password)"
                               InputMode="InputMode.numeric"
                               MaxLength="8"
-                              Validation="@((string? c) => ValidateCode(c))"
+                              Validation="@((string? c) => AccessCodes.ValidateFormat(c))"
                               HelperText="4, 6, or 8 digits"
                               Immediate="true"
                               AutoFocus="true"
@@ -52,17 +53,14 @@
                             Proximity Tag
                         </MudChip>
                     </MudStack>
-                    @if (User.UserIndex != 1)
-                    {
-                        <MudTooltip Text="Immediately writes the disable sentinel to this slot. The panel will clear attributes and partitions. Any unsaved edits on this dialog will be discarded.">
-                            <MudButton Variant="Variant.Filled" Color="Color.Error"
-                                       StartIcon="@Icons.Material.Filled.Block"
-                                       OnClick="DisableAsync"
-                                       Disabled="_busy">
-                                Disable
-                            </MudButton>
-                        </MudTooltip>
-                    }
+                    <MudTooltip Text="Immediately writes the disable sentinel to this slot. The panel will clear attributes and partitions. Any unsaved edits on this dialog will be discarded.">
+                        <MudButton Variant="Variant.Filled" Color="Color.Error"
+                                   StartIcon="@Icons.Material.Filled.Block"
+                                   OnClick="DisableAsync"
+                                   Disabled="_busy">
+                            Disable
+                        </MudButton>
+                    </MudTooltip>
                 </MudStack>
 
                 <MudDivider />
@@ -77,7 +75,7 @@
                               InputType="@(_revealCode ? InputType.Text : InputType.Password)"
                               InputMode="InputMode.numeric"
                               MaxLength="8"
-                              Validation="@((string? c) => ValidateCode(c))"
+                              Validation="@((string? c) => AccessCodes.ValidateFormat(c))"
                               HelperText="4, 6, or 8 digits"
                               Immediate="true"
                               Adornment="Adornment.End"
@@ -86,13 +84,7 @@
                               Style="font-family: 'Courier New', monospace;" />
 
                 @* Attributes *@
-                <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
-                    <MudText Typo="Typo.subtitle2">Attributes</MudText>
-                    @if (User.UserIndex == 1)
-                    {
-                        <MudText Typo="Typo.caption" Color="Color.Secondary">(read-only for master user)</MudText>
-                    }
-                </MudStack>
+                <MudText Typo="Typo.subtitle2">Attributes</MudText>
                 <MudStack Row="true" Spacing="4" Wrap="Wrap.Wrap">
                     @foreach (var (flag, name) in AttributeFlags)
                     {
@@ -101,19 +93,12 @@
                                      Value="@_attributes.HasFlag(f)"
                                      ValueChanged="@(v => ToggleAttribute(f, v))"
                                      Label="@name"
-                                     Dense="true"
-                                     Disabled="@(User.UserIndex == 1)" />
+                                     Dense="true" />
                     }
                 </MudStack>
 
                 @* Partition Assignments *@
-                <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
-                    <MudText Typo="Typo.subtitle2">Partition Assignments</MudText>
-                    @if (User.UserIndex == 1)
-                    {
-                        <MudText Typo="Typo.caption" Color="Color.Secondary">(read-only for master user)</MudText>
-                    }
-                </MudStack>
+                <MudText Typo="Typo.subtitle2">Partition Assignments</MudText>
                 <MudStack Row="true" Spacing="2">
                     @for (int p = 0; p < _partitionAssigned.Length; p++)
                     {
@@ -121,8 +106,7 @@
                         <MudCheckBox T="bool"
                                      @bind-Value="_partitionAssigned[idx]"
                                      Label="@($"P{idx + 1}")"
-                                     Dense="true"
-                                     Disabled="@(User.UserIndex == 1)" />
+                                     Dense="true" />
                     }
                 </MudStack>
             </MudStack>
@@ -181,7 +165,7 @@
     private bool _disabled => User.IsDisabled;
 
     // Save button enablement depends on which view is active.
-    private bool CanSave => _disabled ? IsCodeValid(_newCode) : IsCodeValid(_code);
+    private bool CanSave => _disabled ? AccessCodes.IsValidFormat(_newCode) : AccessCodes.IsValidFormat(_code);
 
     private static readonly (PanelUserAttributes flag, string name)[] AttributeFlags =
     [
@@ -222,19 +206,6 @@
 
     private void ToggleAttribute(PanelUserAttributes flag, bool set) =>
         _attributes = set ? _attributes | flag : _attributes & ~flag;
-
-    /// <summary>4, 6, or 8 numeric digits. Anything else is invalid.</summary>
-    private static bool IsCodeValid(string? code)
-    {
-        if (string.IsNullOrEmpty(code)) return false;
-        if (code.Length != 4 && code.Length != 6 && code.Length != 8) return false;
-        foreach (var ch in code)
-            if (ch < '0' || ch > '9') return false;
-        return true;
-    }
-
-    private static string? ValidateCode(string? code) =>
-        IsCodeValid(code) ? null : "Access code must be 4, 6, or 8 digits";
 
     // ── Disable (immediate write, no Save required) ──
 

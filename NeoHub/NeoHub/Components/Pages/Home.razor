@@ -487,7 +487,5 @@
 
 	private bool HasDefaultAccessCode(string? sessionId) =>
 		!string.IsNullOrEmpty(sessionId) &&
-		!string.IsNullOrEmpty(ConnectionSettings.CurrentValue.Connections
-			.FirstOrDefault(c => string.Equals(c.SessionId, sessionId, StringComparison.OrdinalIgnoreCase))
-			?.DefaultAccessCode);
+		!string.IsNullOrEmpty(ConnectionSettings.CurrentValue.FindBySessionId(sessionId)?.DefaultAccessCode);
 }

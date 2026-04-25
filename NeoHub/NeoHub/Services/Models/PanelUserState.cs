@@ -44,6 +44,16 @@ namespace NeoHub.Services.Models
         public DateTime LastUpdated { get; set; } = DateTime.UtcNow;
 
         /// <summary>
+        /// DSC panels hard-code user 1 as the master. The master has special rules: the panel
+        /// itself owns its attributes and partitions, so those fields are read-only in the UI
+        /// and skipped on write.
+        /// </summary>
+        public const int MasterUserIndex = 1;
+
+        /// <summary>True when this user occupies the master slot (user 1).</summary>
+        public bool IsMaster => UserIndex == MasterUserIndex;
+
+        /// <summary>
         /// True when the user slot is explicitly disabled via an all-'A' sentinel access code.
         /// </summary>
         public bool IsDisabled => IsDisabledCode(CodeValue);

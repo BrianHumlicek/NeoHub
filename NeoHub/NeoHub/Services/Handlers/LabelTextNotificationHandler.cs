@@ -114,7 +114,7 @@ namespace NeoHub.Services.Handlers
                 int userIndex = msg.Start + i;
                 var label = msg.Labels[i]?.Trim();
 
-                if (session.Users.TryGetValue(userIndex, out var state))
+                if (session.UserList.Users.TryGetValue(userIndex, out var state))
                 {
                     state.UserLabel = string.IsNullOrEmpty(label) ? null : label;
                     applied++;
