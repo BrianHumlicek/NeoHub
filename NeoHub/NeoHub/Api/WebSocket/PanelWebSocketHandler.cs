@@ -20,7 +20,7 @@ namespace NeoHub.Api.WebSocket
         private readonly IITv2SessionManager _sessionManager;
         private readonly ISessionMonitor _sessionMonitor;
         private readonly ILogger<PanelWebSocketHandler> _logger;
-        private readonly ConcurrentBag<System.Net.WebSockets.WebSocket> _connectedClients = new();
+        private readonly ConcurrentDictionary<System.Net.WebSockets.WebSocket, byte> _connectedClients = new();
 
         public PanelWebSocketHandler(
             IPanelStateService panelState,
@@ -55,7 +55,7 @@ namespace NeoHub.Api.WebSocket
 
             var webSocket = await context.WebSockets.AcceptWebSocketAsync();
             var clientId = Guid.NewGuid().ToString("N")[..8];
-            _connectedClients.Add(webSocket);
+            _connectedClients.TryAdd(webSocket, 0);
             
             _logger.LogInformation("WebSocket client {ClientId} connected from {RemoteIp}. Total clients: {Count}",
                 clientId, context.Connection.RemoteIpAddress, _connectedClients.Count);
@@ -70,7 +70,7 @@ namespace NeoHub.Api.WebSocket
             }
             finally
             {
-                _connectedClients.TryTake(out _);
+                _connectedClients.TryRemove(webSocket, out _);
                 _logger.LogInformation("WebSocket client {ClientId} disconnected. Total clients: {Count}",
                     clientId, _connectedClients.Count);
                 
@@ -313,14 +313,14 @@ namespace NeoHub.Api.WebSocket
         private void OnSessionsChanged()
         {
             _logger.LogDebug("Session list changed, broadcasting full_state to {Count} clients", 
-                _connectedClients.Count(c => c.State == WebSocketState.Open));
+                _connectedClients.Keys.Count(c => c.State == WebSocketState.Open));
             _ = BroadcastFullStateAsync();
         }
 
         private void OnConfigurationComplete(object? sender, ConfigurationCompleteEventArgs e)
         {
             _logger.LogInformation("Configuration complete for session {SessionId}, broadcasting full_state to {Count} clients",
-                e.SessionId, _connectedClients.Count(c => c.State == WebSocketState.Open));
+                e.SessionId, _connectedClients.Keys.Count(c => c.State == WebSocketState.Open));
             _ = BroadcastFullStateAsync();
         }
 
@@ -369,7 +369,7 @@ namespace NeoHub.Api.WebSocket
 
         private async Task BroadcastFullStateAsync()
         {
-            var openClients = _connectedClients.Where(c => c.State == WebSocketState.Open).ToList();
+            var openClients = _connectedClients.Keys.Where(c => c.State == WebSocketState.Open).ToList();
             _logger.LogTrace("Broadcasting full_state to {Count} clients", openClients.Count);
 
             foreach (var client in openClients)
@@ -387,7 +387,7 @@ namespace NeoHub.Api.WebSocket
 
         private async Task BroadcastMessageAsync(WebSocketMessage message)
         {
-            var openClients = _connectedClients.Where(c => c.State == WebSocketState.Open).ToList();
+            var openClients = _connectedClients.Keys.Where(c => c.State == WebSocketState.Open).ToList();
             _logger.LogTrace("Broadcasting {MessageType} to {Count} clients", message.GetType().Name, openClients.Count);
 
             foreach (var client in openClients)
