@@ -154,6 +154,10 @@ namespace NeoHub.Api.WebSocket
                         await HandleBypassZoneCommandAsync(webSocket, bypassZone, clientId);
                         break;
 
+                    case CommandOutputMessage commandOutput:
+                        await HandleCommandOutputAsync(webSocket, commandOutput, clientId);
+                        break;
+
                     default:
                         _logger.LogWarning("Client {ClientId} sent unknown message type: {MessageType}", clientId, message.GetType().Name);
                         await SendErrorAsync(webSocket, $"Unknown message type: {message.GetType().Name}", clientId);
@@ -267,6 +271,24 @@ namespace NeoHub.Api.WebSocket
             if (!result.Success)
             {
                 await SendErrorAsync(webSocket, result.ErrorMessage ?? "Bypass command failed", clientId);
+            }
+        }
+
+        private async Task HandleCommandOutputAsync(
+            System.Net.WebSockets.WebSocket webSocket,
+            CommandOutputMessage command,
+            string clientId)
+        {
+            _logger.LogInformation(
+                "Client {ClientId} → command_output: Session={SessionId}, Partition={Partition}, Output={Output}",
+                clientId, command.SessionId, command.PartitionNumber, command.OutputNumber);
+
+            var result = await _commandService.TriggerCommandOutputAsync(
+                command.SessionId, command.PartitionNumber, command.OutputNumber, command.Code);
+
+            if (!result.Success)
+            {
+                await SendErrorAsync(webSocket, result.ErrorMessage ?? "Command Output failed", clientId);
             }
         }
 
