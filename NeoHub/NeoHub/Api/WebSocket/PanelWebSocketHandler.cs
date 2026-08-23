@@ -100,7 +100,9 @@ namespace NeoHub.Api.WebSocket
                     if (result.MessageType == WebSocketMessageType.Text)
                     {
                         var json = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                        _logger.LogTrace("Client {ClientId} ← {Json}", clientId, json);
+                        _logger.LogTrace(
+                            "Client {ClientId} message received ({Length} characters)",
+                            clientId, json.Length);
                         await ProcessMessageAsync(webSocket, json, clientId);
                     }
                 }
