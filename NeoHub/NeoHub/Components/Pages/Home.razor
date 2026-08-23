@@ -8,6 +8,7 @@
 @using Microsoft.Extensions.Options
 @inject IPanelStateService PanelState
 @inject IPanelCommandService CommandService
+@inject IPanelAccessCodeService AccessCodes
 @inject IITv2SessionManager SessionManager
 @inject ISessionMonitor SessionMonitor
 @inject NavigationManager Navigation
@@ -156,6 +157,26 @@
                                     </MudText>
                                 </MudStack>
 
+                                @* ── Momentary Command Output actions ── *@
+                                <MudDivider Class="mb-3" />
+                                <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Class="mb-3" Style="flex-wrap: wrap;">
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                        Command Outputs
+                                    </MudText>
+                                    @for (byte output = 1; output <= 4; output++)
+                                    {
+                                        var outputNumber = output;
+                                        <MudButton Variant="Variant.Outlined"
+                                                   Color="Color.Secondary"
+                                                   Size="Size.Small"
+                                                   StartIcon="@Icons.Material.Filled.PlayArrow"
+                                                   OnClick="@(() => RequestCommandOutputAsync(sessionId, partitionNumber, outputNumber))"
+                                                   Disabled="@commandInProgress">
+                                            Output @outputNumber
+                                        </MudButton>
+                                    }
+                                </MudStack>
+
                                 @* ── Inline zone chips ── *@
                                 @if (zonesForPartition.Any())
                                 {
@@ -266,6 +287,42 @@
     </DialogActions>
 </MudDialog>
 
+<MudDialog @bind-Visible="showCommandOutputCodeDialog">
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.PlayArrow" Class="mr-2" />
+            Trigger Command Output @commandOutputNumber
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="3">
+            <MudAlert Severity="Severity.Warning" Dense="true">
+                This will trigger Command Output @commandOutputNumber on partition @commandOutputPartition.
+            </MudAlert>
+            <MudTextField T="string"
+                          @bind-Value="commandOutputCode"
+                          Label="Access Code"
+                          InputType="InputType.Password"
+                          InputMode="InputMode.numeric"
+                          Variant="Variant.Outlined"
+                          AutoFocus="true"
+                          Immediate="true"
+                          MaxLength="8"
+                          HelperText="Used only for this attempt; it will not be saved"
+                          Validation="@((string? code) => AccessCodes.ValidateFormat(code))" />
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CancelCommandOutput">Cancel</MudButton>
+        <MudButton Color="Color.Primary"
+                   Variant="Variant.Filled"
+                   Disabled="@(!AccessCodes.IsValidFormat(commandOutputCode) || commandInProgress)"
+                   OnClick="SubmitCommandOutputAsync">
+            Trigger Output
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
 @code {
 	private List<string> configuredConnections = new();
 	private HashSet<string> activeSessions = new();
@@ -275,6 +332,11 @@
 	private string? disarmSessionId;
 	private byte? disarmPartition;
 	private bool showDisarmDialog;
+	private string commandOutputCode = "";
+	private string? commandOutputSessionId;
+	private byte? commandOutputPartition;
+	private byte? commandOutputNumber;
+	private bool showCommandOutputCodeDialog;
 	private Timer? _clockTimer;
 
 	private bool _disposed;
@@ -418,6 +480,76 @@
 			var result = await CommandService.ArmAsync(sessionId, partition, mode);
 			if (!result.Success)
 				Snackbar.Add($"Arm failed: {result.ErrorMessage}", Severity.Error);
+		}
+		finally
+		{
+			commandInProgress = false;
+			StateHasChanged();
+		}
+	}
+
+	private async Task RequestCommandOutputAsync(string sessionId, byte partition, byte outputNumber)
+	{
+		if (HasDefaultAccessCode(sessionId))
+		{
+			await TriggerCommandOutputAsync(sessionId, partition, outputNumber);
+			return;
+		}
+
+		commandOutputSessionId = sessionId;
+		commandOutputPartition = partition;
+		commandOutputNumber = outputNumber;
+		commandOutputCode = "";
+		showCommandOutputCodeDialog = true;
+	}
+
+	private async Task SubmitCommandOutputAsync()
+	{
+		if (string.IsNullOrEmpty(commandOutputSessionId) ||
+			!commandOutputPartition.HasValue ||
+			!commandOutputNumber.HasValue ||
+			!AccessCodes.IsValidFormat(commandOutputCode))
+		{
+			return;
+		}
+
+		var sessionId = commandOutputSessionId;
+		var partition = commandOutputPartition.Value;
+		var outputNumber = commandOutputNumber.Value;
+		var code = commandOutputCode;
+
+		ClearCommandOutputDialog();
+		await TriggerCommandOutputAsync(sessionId, partition, outputNumber, code);
+	}
+
+	private void CancelCommandOutput() => ClearCommandOutputDialog();
+
+	private void ClearCommandOutputDialog()
+	{
+		showCommandOutputCodeDialog = false;
+		commandOutputCode = "";
+		commandOutputSessionId = null;
+		commandOutputPartition = null;
+		commandOutputNumber = null;
+	}
+
+	private async Task TriggerCommandOutputAsync(
+		string sessionId,
+		byte partition,
+		byte outputNumber,
+		string? accessCode = null)
+	{
+		commandInProgress = true;
+		StateHasChanged();
+
+		try
+		{
+			var result = await CommandService.TriggerCommandOutputAsync(
+				sessionId, partition, outputNumber, accessCode);
+			if (result.Success)
+				Snackbar.Add($"Command Output {outputNumber} sent to partition {partition}", Severity.Success);
+			else
+				Snackbar.Add($"Command Output {outputNumber} failed: {result.ErrorMessage}", Severity.Error);
 		}
 		finally
 		{
