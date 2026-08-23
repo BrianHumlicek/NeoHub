@@ -69,6 +69,41 @@ namespace NeoHub.Services
             return await SendCommandAsync(sessionId, message);
         }
 
+        public async Task<PanelCommandResult> TriggerCommandOutputAsync(
+            string sessionId,
+            byte partition,
+            byte outputNumber,
+            string? accessCode = null)
+        {
+            if (outputNumber is < 1 or > 4)
+                return PanelCommandResult.Error("Command output number must be between 1 and 4");
+
+            var conn = GetConnection(sessionId);
+            var code = accessCode ?? conn?.DefaultAccessCode;
+
+            if (string.IsNullOrEmpty(code))
+                return PanelCommandResult.Error("Access code is required for Command Output");
+
+            if ((code.Length != 4 && code.Length != 6 && code.Length != 8) ||
+                code.Any(digit => digit is < '0' or > '9'))
+            {
+                return PanelCommandResult.Error("Access code must be 4, 6, or 8 digits");
+            }
+
+            _logger.LogInformation(
+                "Command output: Partition={Partition}, Output={Output}, UsingDefaultCode={UsingDefault}",
+                partition, outputNumber,
+                string.IsNullOrEmpty(accessCode) && !string.IsNullOrEmpty(conn?.DefaultAccessCode));
+
+            return await SendCommandAsync(sessionId, new CommandOutput
+            {
+                Partition = partition,
+                OutputNumber = outputNumber,
+                ActivationState = 1,
+                AccessCode = code
+            });
+        }
+
         public async Task<PanelCommandResult> BypassZoneAsync(string sessionId, byte partition, byte zoneNumber, bool bypass, string? accessCode = null)
         {
             var conn = GetConnection(sessionId);

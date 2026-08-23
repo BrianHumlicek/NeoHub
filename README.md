@@ -222,6 +222,24 @@ Once the panel has been configured, return to the NeoHub web UI. If everything i
 - ✅ **Event-driven architecture** — No polling, all updates triggered by actual panel events
 - ✅ **Responsive design** — Works on desktop, tablet, and mobile
 
+### Home Assistant Command Outputs
+
+Home Assistant clients connected to `/api/ws` can trigger Command Outputs 1–4
+with the existing NeoHub WebSocket API:
+
+```json
+{
+  "type": "command_output",
+  "session_id": "panel-session-id",
+  "partition_number": 1,
+  "output_number": 1
+}
+```
+
+The configured default access code is used when `code` is omitted. A client may
+instead provide `"code": "<access-code>"` for that request. Command Outputs are
+exposed as momentary actions, not persistent switches.
+
 ---
 
 ## 🔌 Ports

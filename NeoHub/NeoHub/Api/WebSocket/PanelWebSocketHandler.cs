@@ -100,7 +100,9 @@ namespace NeoHub.Api.WebSocket
                     if (result.MessageType == WebSocketMessageType.Text)
                     {
                         var json = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                        _logger.LogTrace("Client {ClientId} ← {Json}", clientId, json);
+                        _logger.LogTrace(
+                            "Client {ClientId} message received ({Length} characters)",
+                            clientId, json.Length);
                         await ProcessMessageAsync(webSocket, json, clientId);
                     }
                 }
@@ -152,6 +154,10 @@ namespace NeoHub.Api.WebSocket
 
                     case BypassZoneMessage bypassZone:
                         await HandleBypassZoneCommandAsync(webSocket, bypassZone, clientId);
+                        break;
+
+                    case CommandOutputMessage commandOutput:
+                        await HandleCommandOutputAsync(webSocket, commandOutput, clientId);
                         break;
 
                     default:
@@ -267,6 +273,24 @@ namespace NeoHub.Api.WebSocket
             if (!result.Success)
             {
                 await SendErrorAsync(webSocket, result.ErrorMessage ?? "Bypass command failed", clientId);
+            }
+        }
+
+        private async Task HandleCommandOutputAsync(
+            System.Net.WebSockets.WebSocket webSocket,
+            CommandOutputMessage command,
+            string clientId)
+        {
+            _logger.LogInformation(
+                "Client {ClientId} → command_output: Session={SessionId}, Partition={Partition}, Output={Output}",
+                clientId, command.SessionId, command.PartitionNumber, command.OutputNumber);
+
+            var result = await _commandService.TriggerCommandOutputAsync(
+                command.SessionId, command.PartitionNumber, command.OutputNumber, command.Code);
+
+            if (!result.Success)
+            {
+                await SendErrorAsync(webSocket, result.ErrorMessage ?? "Command Output failed", clientId);
             }
         }
 
