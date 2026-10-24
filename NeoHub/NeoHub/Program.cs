@@ -27,6 +27,8 @@ namespace NeoHub
                 reloadOnChange: true);
 
             // Register settings
+            builder.Services.Configure<PanelDisplaySettings>(
+                builder.Configuration.GetSection(PanelDisplaySettings.SectionName));
             builder.Services.Configure<PanelConnectionsSettings>(
                 builder.Configuration.GetSection(PanelConnectionsSettings.SectionName));
             builder.Services.Configure<DiagnosticsSettings>(

@@ -7,6 +7,7 @@
 @using DSC.TLink.ITv2.MediatR
 @using Microsoft.Extensions.Options
 @inject IOptionsMonitor<PanelConnectionsSettings> ConnectionSettings
+@inject IOptionsMonitor<PanelDisplaySettings> PanelDisplay
 @inject IITv2SessionManager SessionManager
 @inject IPanelStateService PanelState
 @inject ISessionMonitor SessionMonitor
@@ -49,12 +50,15 @@
                         </CardHeaderAvatar>
                         <CardHeaderContent>
                             <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
-                                <MudText Typo="Typo.h6">@conn.SessionId</MudText>
-                                <MudChip T="string" Size="Size.Small" Color="@status.Color" Variant="Variant.Outlined">
+                                <MudStack Spacing="0">
+                                    <MudText Typo="Typo.h6">@(PanelDisplay.CurrentValue.Names.TryGetValue(conn.SessionId, out var friendlyName) && !string.IsNullOrWhiteSpace(friendlyName) ? friendlyName : conn.SessionId)</MudText>
+                                    <MudText Typo="Typo.caption" Style="color: var(--mud-palette-text-secondary);">Session ID: @conn.SessionId</MudText>
+                                </MudStack>
+                                <MudChip T="string" Size="Size.Small" Color="@status.Color" Variant="Variant.Filled">
                                     @status.Label
                                 </MudChip>
                             </MudStack>
-                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                            <MudText Typo="Typo.caption" Style="color: var(--mud-palette-text-secondary);">
                                 @GetConnectionSummary(conn, session)
                             </MudText>
                         </CardHeaderContent>
@@ -76,6 +80,23 @@
                     {
                         <MudCardContent>
                             <MudDivider Class="mb-3" />
+                            <MudText Typo="Typo.subtitle2" Class="mb-2">Panel Display Name</MudText>
+                            <MudTextField T="string"
+                                          Label="Panel Name"
+                                          Value="@(editedPanelNames.GetValueOrDefault(conn.SessionId, ""))"
+                                          ValueChanged="@((string value) => editedPanelNames[conn.SessionId] = value)"
+                                          HelperText="Optional friendly name. Does not change the panel's integration ID."
+                                          Variant="Variant.Outlined"
+                                          Margin="Margin.Dense"
+                                          Class="mb-3" />
+                            <MudButton Variant="Variant.Filled"
+                                       Color="Color.Primary"
+                                       Size="Size.Small"
+                                       Disabled="@saving"
+                                       OnClick="@(() => SavePanelNameAsync(conn.SessionId))"
+                                       Class="mb-4">
+                                Save Name
+                            </MudButton>
                             <MudText Typo="Typo.subtitle2" Class="mb-2">Connection Settings</MudText>
                             <MudGrid Spacing="2">
                                 <MudItem xs="12" sm="6">
@@ -242,6 +263,7 @@
 
     private List<ConnectionSettings> connections = new();
     private HashSet<string> activeSessions = new();
+    private Dictionary<string, string> editedPanelNames = new();
     private HashSet<string> visibleFields = new();
     private string? expandedSettings;
     private string? expandedLogs;
@@ -251,6 +273,8 @@
 
     protected override void OnInitialized()
     {
+        editedPanelNames = new Dictionary<string, string>(
+            PanelDisplay.CurrentValue.Names, StringComparer.OrdinalIgnoreCase);
         RefreshData();
         if (!string.IsNullOrEmpty(ExpandSessionId))
             expandedSettings = ExpandSessionId;
@@ -351,6 +375,40 @@
         RefreshData();
     }
 
+    private async Task SavePanelNameAsync(string sessionId)
+    {
+        if (saving) return;
+
+        saving = true;
+        try
+        {
+            var names = new Dictionary<string, string>(
+                PanelDisplay.CurrentValue.Names, StringComparer.OrdinalIgnoreCase);
+
+            var name = editedPanelNames.GetValueOrDefault(sessionId, "").Trim();
+
+            if (string.IsNullOrEmpty(name))
+                names.Remove(sessionId);
+            else
+                names[sessionId] = name;
+
+            var settings = new PanelDisplaySettings { Names = names };
+
+            await PersistenceService.SaveSettingsAsync(
+                typeof(PanelDisplaySettings), settings);
+
+            Snackbar.Add("Panel name saved", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to save panel name: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
     private async Task SaveSettingsAsync()
     {
         saving = true;
@@ -384,7 +442,7 @@
         {
             if (!conn.IsComplete)
                 return (Color.Warning, Icons.Material.Filled.Warning, "Needs Configuration");
-            return (Color.Default, Icons.Material.Filled.LinkOff, "Disconnected");
+            return (Color.Error, Icons.Material.Filled.LinkOff, "Disconnected");
         }
 
         var session = PanelState.GetSession(conn.SessionId);
