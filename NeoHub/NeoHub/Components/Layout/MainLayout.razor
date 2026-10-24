@@ -6,10 +6,11 @@
 @inject IPanelStateService PanelState
 @inject IITv2SessionManager SessionManager
 @inject IJSRuntime JS
+@inject ThemePreferenceService ThemePreferences
 @implements IDisposable
 
 <!-- ✅ Add MudBlazor Providers -->
-<MudThemeProvider />
+<MudThemeProvider @bind-IsDarkMode="_isDarkMode" ObserveSystemThemeChange="@(_themePreference == "system")" />
 <MudPopoverProvider />
 <MudDialogProvider />
 <MudSnackbarProvider />
@@ -65,7 +66,7 @@
     </MudAlert>
 }
 
-<div class="page">
+<div class="page @(_isDarkMode ? "theme-dark" : "theme-light")">
     <div class="sidebar">
         <NavMenu />
     </div>
@@ -88,14 +89,50 @@
 </div>
 
 @code {
+    private bool _isDarkMode = false;
+    private string _themePreference = "system";
     private Timer? _refreshTimer;
     private bool _isBeeping = false;
     private bool _wasUrgent = false;
     private CancellationTokenSource _cts = new();
 
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+            return;
+
+        var savedPreference = await JS.InvokeAsync<string>("neoHubTheme.getPreference");
+        _themePreference = savedPreference is "light" or "dark" or "system"
+            ? savedPreference
+            : "system";
+
+        ThemePreferences.SetPreference(_themePreference);
+
+        _isDarkMode = _themePreference == "dark" ||
+            (_themePreference == "system" &&
+             await JS.InvokeAsync<bool>("neoHubTheme.systemPrefersDark"));
+
+        StateHasChanged();
+    }
+
+    private void OnThemePreferenceChanged()
+    {
+        _ = InvokeAsync(async () =>
+        {
+            var preference = ThemePreferences.Preference;
+            _themePreference = preference;
+            _isDarkMode = preference == "dark" ||
+                (preference == "system" &&
+                 await JS.InvokeAsync<bool>("neoHubTheme.systemPrefersDark"));
+
+            StateHasChanged();
+        });
+    }
+
     protected override void OnInitialized()
     {
         PanelState.PartitionStateChanged += OnPartitionStateChanged;
+        ThemePreferences.ThemeChanged += OnThemePreferenceChanged;
 
         // Refresh UI every second for countdown and audio management
         _refreshTimer = new Timer(_ =>
@@ -206,6 +243,7 @@
         _refreshTimer?.Dispose();
 
         PanelState.PartitionStateChanged -= OnPartitionStateChanged;
+        ThemePreferences.ThemeChanged -= OnThemePreferenceChanged;
         _cts.Dispose();
     }
 }

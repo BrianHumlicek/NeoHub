@@ -1,11 +1,14 @@
 @page "/settings"
 @using NeoHub.Services.Settings
+@using NeoHub.Services
 @using System.ComponentModel.DataAnnotations
 @using System.Reflection
 @using MudBlazor
 @inject ISettingsDiscoveryService DiscoveryService
 @inject ISettingsPersistenceService PersistenceService
 @inject ISnackbar Snackbar
+@inject ThemePreferenceService ThemePreferences
+@inject Microsoft.JSInterop.IJSRuntime JS
 
 <PageTitle>Settings</PageTitle>
 
@@ -18,6 +21,24 @@
     <MudAlert Severity="Severity.Info" Class="mt-2 mb-4">
         Settings are saved to <code>userSettings.json</code> and override defaults from <code>appsettings.json</code>
     </MudAlert>
+
+    <MudPaper Elevation="2" Class="pa-4 mt-4 mb-4">
+        <MudText Typo="Typo.h5" GutterBottom="true">Appearance</MudText>
+        <MudText Typo="Typo.body2" Class="mb-3">
+            Display preferences are saved in this browser and do not affect other operators.
+        </MudText>
+        <MudSelect T="string"
+                   Label="Theme"
+                   Value="@ThemePreferences.Preference"
+                   ValueChanged="OnAppearanceThemeChanged"
+                   Variant="Variant.Outlined"
+                   Style="max-width: 220px;">
+            <MudSelectItem T="string" Value="@("system")">System</MudSelectItem>
+            <MudSelectItem T="string" Value="@("light")">Light</MudSelectItem>
+            <MudSelectItem T="string" Value="@("dark")">Dark</MudSelectItem>
+        </MudSelect>
+    </MudPaper>
+
 
     @if (!_settingsInstances.Any())
     {
@@ -82,6 +103,12 @@
 @code {
     private Dictionary<Type, object> _settingsInstances = new();
     private bool _saving = false;
+    private async Task OnAppearanceThemeChanged(string preference)
+    {
+        ThemePreferences.SetPreference(preference);
+        await JS.InvokeVoidAsync("neoHubTheme.setPreference", preference);
+    }
+
 
     protected override void OnInitialized()
     {

@@ -37,6 +37,7 @@ namespace NeoHub
             // Register settings services
             builder.Services.AddSingleton<ISettingsDiscoveryService, SettingsDiscoveryService>();
             builder.Services.AddSingleton<ISettingsPersistenceService, SettingsPersistenceService>();
+            builder.Services.AddScoped<ThemePreferenceService>();
 
             // Diagnostics log service (must be before logging configuration)
             builder.Services.AddSingleton<IDiagnosticsLogService, DiagnosticsLogService>();

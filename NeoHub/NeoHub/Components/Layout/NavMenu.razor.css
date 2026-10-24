@@ -124,3 +124,16 @@
     font-size: 0.7rem;
     line-height: 1.6;
 }
+
+/* Keep MudBlazor navigation readable against the sidebar gradient. */
+.nav-item ::deep .mud-nav-link,
+.nav-item ::deep .mud-nav-link .mud-nav-link-text,
+.nav-item ::deep .mud-nav-link .mud-nav-link-icon {
+    color: #d7d7d7;
+}
+
+.nav-item ::deep .mud-nav-link.active,
+.nav-item ::deep .mud-nav-link.active .mud-nav-link-text,
+.nav-item ::deep .mud-nav-link.active .mud-nav-link-icon {
+    color: #ffffff;
+}
